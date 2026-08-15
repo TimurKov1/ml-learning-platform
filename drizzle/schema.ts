@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mysqlEnum, mysqlTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -16,7 +16,10 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
+  username: varchar("username", { length: 32 }).unique(),
+  passwordHash: varchar("passwordHash", { length: 255 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -25,4 +28,61 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const courseSections = mysqlTable("course_sections", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 160 }).notNull(),
+  description: text("description"),
+  orderIndex: int("orderIndex").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const lessons = mysqlTable("lessons", {
+  id: int("id").autoincrement().primaryKey(),
+  sectionId: int("sectionId").notNull().references(() => courseSections.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 180 }).notNull(),
+  summary: varchar("summary", { length: 500 }),
+  contentMode: mysqlEnum("contentMode", ["text", "video", "mixed"]).notNull(),
+  textContent: text("textContent"),
+  videoUrl: varchar("videoUrl", { length: 2000 }),
+  orderIndex: int("orderIndex").default(0).notNull(),
+  isPublished: boolean("isPublished").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("lessons_section_order_idx").on(table.sectionId, table.orderIndex)]);
+
+export const lessonMaterials = mysqlTable("lesson_materials", {
+  id: int("id").autoincrement().primaryKey(),
+  lessonId: int("lessonId").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 180 }).notNull(),
+  sourceType: mysqlEnum("sourceType", ["file", "link"]).notNull(),
+  fileUrl: varchar("fileUrl", { length: 2000 }).notNull(),
+  fileKey: varchar("fileKey", { length: 512 }),
+  orderIndex: int("orderIndex").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [index("lesson_materials_lesson_order_idx").on(table.lessonId, table.orderIndex)]);
+
+export const assignments = mysqlTable("assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  lessonId: int("lessonId").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 180 }).notNull(),
+  instructions: text("instructions").notNull(),
+  orderIndex: int("orderIndex").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("assignments_lesson_order_idx").on(table.lessonId, table.orderIndex)]);
+
+export const lessonViews = mysqlTable("lesson_views", {
+  studentId: int("studentId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  lessonId: int("lessonId").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  viewedAt: timestamp("viewedAt").defaultNow().notNull(),
+}, table => [primaryKey({ columns: [table.studentId, table.lessonId] })]);
+
+export const assignmentSubmissions = mysqlTable("assignment_submissions", {
+  id: int("id").autoincrement().primaryKey(),
+  studentId: int("studentId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  assignmentId: int("assignmentId").notNull().references(() => assignments.id, { onDelete: "cascade" }),
+  response: text("response").notNull(),
+  completedAt: timestamp("completedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("assignment_submissions_student_assignment_unique").on(table.studentId, table.assignmentId)]);
