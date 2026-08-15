@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, normalizeFunctionSignature, parseStructuredPythonTests, validateStructuredTestArity } from "./pythonTestCases";
+import { buildPythonTestCode, extractSolutionSignature, getPythonSolutionTemplate, getVisiblePythonExamples, normalizeFunctionSignature, parseStructuredPythonTests, validateStructuredTestArity } from "./pythonTestCases";
 
 const structured = JSON.stringify({
   format: "structured-v1",
@@ -25,6 +25,11 @@ describe("structured Python test cases", () => {
   it("generates a solution template with parameters from test inputs", () => {
     expect(getPythonSolutionTemplate(structured)).toContain("def solution(arg1, arg2):");
     expect(getPythonSolutionTemplate(structured)).toContain("Имя solution менять нельзя");
+  });
+
+  it("uses parameter names from the administrator starter code", () => {
+    expect(extractSolutionSignature("def solution(numbers, limit):\\n    return 0")).toBe("solution(numbers, limit)");
+    expect(getPythonSolutionTemplate(structured, null, "def solution(numbers, limit):\\n    return 0")).toContain("def solution(numbers, limit):");
   });
 
   it("supports explicit one- and multi-argument signatures", () => {

@@ -90,8 +90,13 @@ export function validateStructuredTestArity(value: string | null | undefined, si
   return null;
 }
 
-export function getPythonSolutionTemplate(value: string | null | undefined, signature?: string | null): string {
-  const header = normalizeFunctionSignature(signature, value);
+export function extractSolutionSignature(code: string | null | undefined): string | null {
+  const match = code?.match(/(?:^|\n)\s*def\s+solution\s*\([^)]*\)\s*:/);
+  return match ? normalizeFunctionSignature(match[0].trim()) : null;
+}
+
+export function getPythonSolutionTemplate(value: string | null | undefined, signature?: string | null, starterCode?: string | null): string {
+  const header = normalizeFunctionSignature(signature ?? extractSolutionSignature(starterCode), value);
   return `def ${header}:\n    # Напишите решение здесь. Имя solution менять нельзя.\n    pass`;
 }
 
