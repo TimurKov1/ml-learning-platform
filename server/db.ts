@@ -257,9 +257,10 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
     materials,
     assignments: lessonAssignments.map(assignment => {
       const submission = submissionsByAssignment.get(assignment.id);
-      const { testsJson, ...studentSafeAssignment } = assignment;
+      const { testsJson, starterCode, ...studentSafeAssignment } = assignment;
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
-      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: submission?.response ?? null, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
+      const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && submission?.status !== "revision" ? null : submission?.response ?? null;
+      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -343,7 +344,7 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   if (isCode && !input.response?.trim()) throw new Error("Добавьте Python-код перед отправкой.");
   if (!isCode && !input.submittedFileKey) throw new Error("Прикрепите файл перед отправкой.");
   const autoCheck = isCode ? await runPythonChecks(input.response!, buildPythonTestCode(assignment[0].testsJson)) : null;
-  const status = autoCheck?.passed ? "approved" : "pending";
+  const status = isCode ? (autoCheck?.passed ? "approved" : "revision") : "pending";
   await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
   return { success: true, status, autoCheck };
 }

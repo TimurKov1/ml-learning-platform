@@ -21,7 +21,7 @@ export default function StudentWorkspace() {
   const [responses, setResponses] = useState<Record<number, string>>({});
   const lesson = trpc.student.lesson.useQuery({ id: activeLessonId ?? 0 }, { enabled: Boolean(activeLessonId) });
   const markViewed = trpc.student.markViewed.useMutation({ onSuccess: async () => { await Promise.all([curriculum.refetch(), progress.refetch()]); } });
-  const submit = trpc.student.submitAssignment.useMutation({ onSuccess: async result => { toast.success(result.status === "approved" ? "Все тесты пройдены — задание зачтено." : "Решение отправлено на проверку."); await Promise.all([lesson.refetch(), curriculum.refetch(), progress.refetch()]); }, onError: error => toast.error(error.message) });
+  const submit = trpc.student.submitAssignment.useMutation({ onSuccess: async result => { if (result.status === "approved") toast.success("Все тесты пройдены — задание зачтено."); else if (result.autoCheck) toast.error("Тесты не пройдены. Исправьте код и отправьте его повторно."); else toast.success("Файл отправлен преподавателю на проверку."); await Promise.all([lesson.refetch(), curriculum.refetch(), progress.refetch()]); }, onError: error => toast.error(error.message) });
   const openMaterial = trpc.student.materials.open.useMutation();
   const sections = (curriculum.data ?? []) as CurriculumSection[];
   const totals = useMemo(() => ({ lessons: sections.reduce((sum, section) => sum + section.lessons.length, 0), completedLessons: sections.reduce((sum, section) => sum + section.lessons.filter(lessonItem => lessonItem.isCompleted).length, 0), assignments: progress.data?.completedAssignmentIds.length ?? 0 }), [progress.data, sections]);
