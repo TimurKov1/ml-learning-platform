@@ -7,15 +7,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { AdminQueryState } from "@/components/AdminQueryState";
 import { LessonExtrasPanel } from "@/components/LessonExtrasPanel";
+import { SubmissionsReviewPanel } from "@/components/SubmissionsReviewPanel";
 import { StudentsManagerPanel } from "@/components/StudentsManagerPanel";
-import { BookOpenText, CheckCircle2, ChevronRight, CirclePlus, ClipboardList, FileText, LayoutDashboard, Link as LinkIcon, Loader2, LogOut, Pencil, Plus, Trash2, Upload, UsersRound, Video } from "lucide-react";
+import { BookOpenText, CheckCircle2, ChevronRight, CirclePlus, ClipboardCheck, ClipboardList, FileText, LayoutDashboard, Link as LinkIcon, Loader2, LogOut, Pencil, Plus, Trash2, Upload, UsersRound, Video } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-type AdminTab = "overview" | "sections" | "lessons" | "students";
+type AdminTab = "overview" | "sections" | "lessons" | "reviews" | "students";
 type LessonForm = { id: number | null; sectionId: string; title: string; summary: string; textContent: string; videoUrl: string; orderIndex: string; isPublished: boolean };
 
-const blankLesson = (sectionId = ""): LessonForm => ({ id: null, sectionId, title: "", summary: "", textContent: "", videoUrl: "", orderIndex: "0", isPublished: true });
+const blankLesson = (sectionId = ""): LessonForm => ({ id: null, sectionId, title: "", summary: "", textContent: "", videoUrl: "", orderIndex: "0", isPublished: false });
 
 function TinyEmpty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-2xl border border-dashed border-[#d8d2c7] bg-[#fbfaf7] px-5 py-8 text-center text-sm leading-6 text-[#7a8496]">{children}</div>;
@@ -41,6 +42,7 @@ export default function AdminWorkspace() {
     { id: "overview" as const, label: "Обзор", icon: LayoutDashboard },
     { id: "sections" as const, label: "Разделы", icon: BookOpenText },
     { id: "lessons" as const, label: "Уроки", icon: ClipboardList },
+    { id: "reviews" as const, label: "Проверка", icon: ClipboardCheck },
     { id: "students" as const, label: "Ученики", icon: UsersRound },
   ];
 
@@ -65,6 +67,7 @@ export default function AdminWorkspace() {
           {tab === "overview" && <Overview sections={sections.length} lessons={lessons.length} students={students.length} statistics={statistics} loading={sectionsQuery.isLoading || lessonsQuery.isLoading || studentsQuery.isLoading || statisticsQuery.isLoading} error={sectionsQuery.error || lessonsQuery.error || studentsQuery.error || statisticsQuery.error} onRetry={() => { void Promise.all([sectionsQuery.refetch(), lessonsQuery.refetch(), studentsQuery.refetch(), statisticsQuery.refetch()]); }} />}
           {tab === "sections" && <SectionsManager sections={sections} onChanged={refreshCourse} loading={sectionsQuery.isLoading} error={sectionsQuery.error} onRetry={() => { void sectionsQuery.refetch(); }} />}
           {tab === "lessons" && <LessonsManager sections={sections} lessons={lessons} onChanged={refreshCourse} loading={sectionsQuery.isLoading || lessonsQuery.isLoading} error={sectionsQuery.error || lessonsQuery.error} onRetry={() => { void refreshCourse(); }} />}
+          {tab === "reviews" && <SubmissionsReviewPanel onChanged={async () => { await statisticsQuery.refetch(); }} />}
           {tab === "students" && <StudentsManagerPanel students={students} statistics={statistics} loading={studentsQuery.isLoading || statisticsQuery.isLoading} error={studentsQuery.error || statisticsQuery.error} onRetry={() => { void Promise.all([studentsQuery.refetch(), statisticsQuery.refetch()]); }} onChanged={async () => { await Promise.all([studentsQuery.refetch(), statisticsQuery.refetch()]); }} />}
         </div>
       </main>
@@ -99,7 +102,7 @@ function LessonsManager({ sections, lessons, onChanged, loading, error, onRetry 
   if (loading || error) return <AdminQueryState loading={loading} error={error} onRetry={onRetry} label="уроки" />;
   const [form, setForm] = useState<LessonForm>(() => blankLesson(sections[0]?.id ? String(sections[0].id) : ""));
   const detail = trpc.admin.course.lessons.detail.useQuery({ id: form.id ?? 0 }, { enabled: Boolean(form.id) });
-  const create = trpc.admin.course.lessons.create.useMutation({ onSuccess: async result => { toast.success("Урок создан. Добавьте материалы и задания."); setForm(current => ({ ...current, id: result.id })); await onChanged(); }, onError: error => toast.error(error.message) });
+  const create = trpc.admin.course.lessons.create.useMutation({ onSuccess: async result => { toast.success(form.isPublished ? "Урок опубликован. Добавьте материалы и задания." : "Черновик сохранён. Теперь можно добавить материалы и задания."); setForm(current => ({ ...current, id: result.id })); await onChanged(); }, onError: error => toast.error(error.message) });
   const update = trpc.admin.course.lessons.update.useMutation({ onSuccess: async () => { toast.success("Урок сохранён."); await onChanged(); await detail.refetch(); }, onError: error => toast.error(error.message) });
   const remove = trpc.admin.course.lessons.delete.useMutation({ onSuccess: async () => { toast.success("Урок удалён."); setForm(blankLesson(sections[0]?.id ? String(sections[0].id) : "")); await onChanged(); }, onError: error => toast.error(error.message) });
   useEffect(() => { if (detail.data) setForm({ id: detail.data.id, sectionId: String(detail.data.sectionId), title: detail.data.title, summary: detail.data.summary ?? "", textContent: detail.data.textContent ?? "", videoUrl: detail.data.videoUrl ?? "", orderIndex: String(detail.data.orderIndex), isPublished: detail.data.isPublished }); }, [detail.data]);

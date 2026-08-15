@@ -13,6 +13,7 @@ import {
 } from "../drizzle/schema";
 import { hashPassword } from "./auth/password";
 import { ENV } from "./_core/env";
+import { storageGetSignedUrl } from "./storage";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -149,7 +150,7 @@ export async function getStudentStats() {
   const students = await listStudentAccounts();
   return Promise.all(students.map(async student => {
     const viewed = await db.select({ total: count() }).from(lessonViews).where(eq(lessonViews.studentId, student.id));
-    const completed = await db.select({ total: count() }).from(assignmentSubmissions).where(eq(assignmentSubmissions.studentId, student.id));
+    const completed = await db.select({ total: count() }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, student.id), eq(assignmentSubmissions.status, "approved")));
     return { ...student, viewedLessons: viewed[0]?.total ?? 0, completedAssignments: completed[0]?.total ?? 0 };
   }));
 }
@@ -239,7 +240,10 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
     ...lesson,
     isViewed: view.length > 0,
     materials,
-    assignments: lessonAssignments.map(assignment => ({ ...assignment, isCompleted: submissionsByAssignment.has(assignment.id), response: submissionsByAssignment.get(assignment.id)?.response ?? null })),
+    assignments: lessonAssignments.map(assignment => {
+      const submission = submissionsByAssignment.get(assignment.id);
+      return { ...assignment, isCompleted: submission?.status === "approved", response: submission?.response ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
+    }),
   };
 }
 
@@ -262,6 +266,23 @@ export async function updateLessonMaterial(id: number, input: { title: string; f
   if (!db) throw new Error("Database is unavailable");
   await db.update(lessonMaterials).set(input).where(eq(lessonMaterials.id, id));
   return { success: true };
+}
+
+export async function getStudentMaterialAccessUrl(materialId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const result = await db
+    .select({ sourceType: lessonMaterials.sourceType, fileUrl: lessonMaterials.fileUrl, fileKey: lessonMaterials.fileKey, isPublished: lessons.isPublished })
+    .from(lessonMaterials)
+    .innerJoin(lessons, eq(lessonMaterials.lessonId, lessons.id))
+    .where(eq(lessonMaterials.id, materialId))
+    .limit(1);
+  const material = result[0];
+  if (!material || !material.isPublished) return null;
+  if (material.sourceType === "file" && material.fileKey) {
+    return { url: await storageGetSignedUrl(material.fileKey) };
+  }
+  return { url: material.fileUrl };
 }
 
 export async function addAssignment(input: { lessonId: number; title: string; instructions: string; orderIndex: number }) {
@@ -299,8 +320,8 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   if (!db) throw new Error("Database is unavailable");
   const assignment = await db.select({ id: assignments.id, isPublished: lessons.isPublished }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
   if (!assignment[0]?.isPublished) throw new Error("Assignment is unavailable");
-  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response }).onDuplicateKeyUpdate({ set: { response, completedAt: new Date() } });
-  return { success: true };
+  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response, status: "pending" }).onDuplicateKeyUpdate({ set: { response, status: "pending", reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
+  return { success: true, status: "pending" as const };
 }
 
 export async function listStudentProgress(studentId: number) {
@@ -308,7 +329,42 @@ export async function listStudentProgress(studentId: number) {
   if (!db) return { viewedLessonIds: [], completedAssignmentIds: [] };
   const [views, submissions] = await Promise.all([
     db.select({ lessonId: lessonViews.lessonId }).from(lessonViews).where(eq(lessonViews.studentId, studentId)),
-    db.select({ assignmentId: assignmentSubmissions.assignmentId }).from(assignmentSubmissions).where(eq(assignmentSubmissions.studentId, studentId)),
+    db.select({ assignmentId: assignmentSubmissions.assignmentId }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, studentId), eq(assignmentSubmissions.status, "approved"))),
   ]);
   return { viewedLessonIds: views.map(row => row.lessonId), completedAssignmentIds: submissions.map(row => row.assignmentId) };
+}
+
+export async function listAssignmentSubmissionsForReview() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: assignmentSubmissions.id,
+      response: assignmentSubmissions.response,
+      status: assignmentSubmissions.status,
+      reviewComment: assignmentSubmissions.reviewComment,
+      submittedAt: assignmentSubmissions.completedAt,
+      reviewedAt: assignmentSubmissions.reviewedAt,
+      studentId: users.id,
+      studentName: users.name,
+      studentUsername: users.username,
+      assignmentId: assignments.id,
+      assignmentTitle: assignments.title,
+      assignmentInstructions: assignments.instructions,
+      lessonTitle: lessons.title,
+      sectionTitle: courseSections.title,
+    })
+    .from(assignmentSubmissions)
+    .innerJoin(users, eq(assignmentSubmissions.studentId, users.id))
+    .innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id))
+    .innerJoin(lessons, eq(assignments.lessonId, lessons.id))
+    .innerJoin(courseSections, eq(lessons.sectionId, courseSections.id))
+    .orderBy(desc(assignmentSubmissions.updatedAt));
+}
+
+export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; reviewComment: string | null; reviewerId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(assignmentSubmissions).set({ status: input.status, reviewComment: input.reviewComment, reviewedAt: new Date(), reviewedById: input.reviewerId }).where(eq(assignmentSubmissions.id, input.id));
+  return { success: true };
 }

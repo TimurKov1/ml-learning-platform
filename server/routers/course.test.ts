@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "../_core/context";
 
 const db = {
-  addAssignment: vi.fn(), addLessonMaterial: vi.fn(), createCourseSection: vi.fn(), createLesson: vi.fn(), deleteAssignment: vi.fn(), deleteCourseSection: vi.fn(), deleteLesson: vi.fn(), deleteLessonMaterial: vi.fn(), getLessonDetail: vi.fn(), listAdminLessons: vi.fn(), listCourseSectionsWithLessons: vi.fn(), listStudentProgress: vi.fn(), markLessonViewed: vi.fn(), submitAssignment: vi.fn(), updateAssignment: vi.fn(), updateCourseSection: vi.fn(), updateLessonMaterial: vi.fn(), updateLesson: vi.fn(),
+  addAssignment: vi.fn(), addLessonMaterial: vi.fn(), createCourseSection: vi.fn(), createLesson: vi.fn(), deleteAssignment: vi.fn(), deleteCourseSection: vi.fn(), deleteLesson: vi.fn(), deleteLessonMaterial: vi.fn(), getLessonDetail: vi.fn(), getStudentMaterialAccessUrl: vi.fn(), listAdminLessons: vi.fn(), listCourseSectionsWithLessons: vi.fn(), listStudentProgress: vi.fn(), markLessonViewed: vi.fn(), submitAssignment: vi.fn(), updateAssignment: vi.fn(), updateCourseSection: vi.fn(), updateLessonMaterial: vi.fn(), updateLesson: vi.fn(),
 };
 
 vi.mock("../db", () => db);
@@ -40,5 +40,12 @@ describe("course routers", () => {
     expect(db.getLessonDetail).toHaveBeenCalledWith(3, false, 42);
     expect(db.markLessonViewed).toHaveBeenCalledWith(42, 3);
     expect(db.submitAssignment).toHaveBeenCalledWith(42, 11, "Ссылка на решение");
+  });
+
+  it("returns an authenticated file URL only for a student material request", async () => {
+    db.getStudentMaterialAccessUrl.mockResolvedValue({ url: "https://signed-storage.example/material.pdf" });
+    const caller = studentCourseRouter.createCaller(context("user"));
+    await expect(caller.materials.open({ materialId: 8 })).resolves.toEqual({ url: "https://signed-storage.example/material.pdf" });
+    expect(db.getStudentMaterialAccessUrl).toHaveBeenCalledWith(8);
   });
 });

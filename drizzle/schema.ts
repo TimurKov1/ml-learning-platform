@@ -83,6 +83,10 @@ export const assignmentSubmissions = mysqlTable("assignment_submissions", {
   studentId: int("studentId").notNull().references(() => users.id, { onDelete: "cascade" }),
   assignmentId: int("assignmentId").notNull().references(() => assignments.id, { onDelete: "cascade" }),
   response: text("response").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "revision"]).default("pending").notNull(),
+  reviewComment: text("reviewComment"),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedById: int("reviewedById"),
   completedAt: timestamp("completedAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [uniqueIndex("assignment_submissions_student_assignment_unique").on(table.studentId, table.assignmentId)]);

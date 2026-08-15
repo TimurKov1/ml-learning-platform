@@ -10,6 +10,7 @@ import {
   deleteLesson,
   deleteLessonMaterial,
   getLessonDetail,
+  getStudentMaterialAccessUrl,
   listAdminLessons,
   listCourseSectionsWithLessons,
   listStudentProgress,
@@ -104,4 +105,11 @@ export const studentCourseRouter = router({
   submitAssignment: studentProcedure
     .input(z.object({ assignmentId: z.number().int().positive(), response: z.string().trim().min(1, "Добавьте ответ перед отправкой.").max(20_000) }))
     .mutation(({ input, ctx }) => submitAssignment(ctx.user.id, input.assignmentId, input.response)),
+  materials: router({
+    open: studentProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ input }) => {
+      const material = await getStudentMaterialAccessUrl(input.materialId);
+      if (!material) throw new TRPCError({ code: "NOT_FOUND", message: "Материал недоступен." });
+      return material;
+    }),
+  }),
 });

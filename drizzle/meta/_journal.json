@@ -15,6 +15,13 @@
       "when": 1786804063279,
       "tag": "0001_large_living_tribunal",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786807840266,
+      "tag": "0002_striped_rockslide",
+      "breakpoints": true
     }
   ]
 }
