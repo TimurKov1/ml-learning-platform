@@ -7,20 +7,24 @@ type Props = {
   minHeight?: string;
 };
 
-const KEYWORDS = /\b(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)\b/g;
+const TOKEN_PATTERN = /#[^\n]*|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*(?=\s*\()|\*\*|\x2f\x2f|==|!=|<=|>=|[=+\-*\x2f%<>]/g;
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function highlightPython(value: string) {
-  const escaped = escapeHtml(value);
-  return escaped
-    .replace(/(&quot;&quot;&quot;[\s\S]*?&quot;&quot;&quot;|&quot;[^\n]*?&quot;|&#39;[^\n]*?&#39;)/g, '<span class="text-[#f0c674]">$1</span>')
-    .replace(/(#[^\n]*)/g, '<span class="text-[#8fbd8b]">$1</span>')
-    .replace(KEYWORDS, '<span class="text-[#d6a8e8]">$1</span>')
-    .replace(/\b([A-Za-z_]\w*)\s*(?=\()/g, '<span class="text-[#7fc8e8]">$1</span>')
-    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="text-[#8fd7d0]">$1</span>');
+  let html = "";
+  let cursor = 0;
+  for (const match of Array.from(value.matchAll(TOKEN_PATTERN))) {
+    const token = match[0];
+    const index = match.index ?? cursor;
+    html += escapeHtml(value.slice(cursor, index));
+    const color = token.startsWith("#") ? "#8fbd8b" : token.startsWith("\"") || token.startsWith("'") ? "#f0c674" : /^(\*\*|\/\/|==|!=|<=|>=|[=+\-*/%<>])$/.test(token) ? "#e49aa4" : /^\d/.test(token) ? "#8fd7d0" : /^(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)$/.test(token) ? "#d6a8e8" : "#7fc8e8";
+    html += `<span style="color:${color}">${escapeHtml(token)}</span>`;
+    cursor = index + token.length;
+  }
+  return html + escapeHtml(value.slice(cursor));
 }
 
 export function PythonCodeEditor({ value, onChange, placeholder = "def solution(...):", minHeight = "min-h-64" }: Props) {
@@ -35,6 +39,17 @@ export function PythonCodeEditor({ value, onChange, placeholder = "def solution(
     const target = event.currentTarget;
     const start = target.selectionStart;
     const end = target.selectionEnd;
+    if (event.key === "Enter" && start === end) {
+      event.preventDefault();
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      const currentLine = value.slice(lineStart, start);
+      const indent = currentLine.match(/^\s*/)?.[0] ?? "";
+      const extraIndent = /:\s*(?:#.*)?$/.test(currentLine) ? "    " : "";
+      const insertion = `\n${indent}${extraIndent}`;
+      onChange(value.slice(0, start) + insertion + value.slice(end));
+      requestAnimationFrame(() => target.setSelectionRange(start + insertion.length, start + insertion.length));
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
       if (event.shiftKey) {
