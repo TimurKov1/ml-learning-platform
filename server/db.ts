@@ -259,8 +259,9 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
       const submission = submissionsByAssignment.get(assignment.id);
       const { testsJson, starterCode, ...studentSafeAssignment } = assignment;
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
-      const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && submission?.status !== "revision" ? null : submission?.response ?? null;
-      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
+      const normalizedStudentStatus = !includeUnpublished && assignment.assignmentType === "code" && submission?.status === "pending" && submission.autoCheckResult ? "revision" : submission?.status ?? null;
+      const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && normalizedStudentStatus !== "revision" ? null : submission?.response ?? null;
+      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
