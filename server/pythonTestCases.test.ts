@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPythonTestCode, getVisiblePythonExamples, parseStructuredPythonTests } from "./pythonTestCases";
+import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, normalizeFunctionSignature, parseStructuredPythonTests, validateStructuredTestArity } from "./pythonTestCases";
 
 const structured = JSON.stringify({
   format: "structured-v1",
@@ -20,6 +20,22 @@ describe("structured Python test cases", () => {
     const code = buildPythonTestCode(structured);
     expect(code).toContain("solution(*[2,3]) == 5");
     expect(code).toContain("test_case_2");
+  });
+
+  it("generates a solution template with parameters from test inputs", () => {
+    expect(getPythonSolutionTemplate(structured)).toContain("def solution(arg1, arg2):");
+    expect(getPythonSolutionTemplate(structured)).toContain("Имя solution менять нельзя");
+  });
+
+  it("supports explicit one- and multi-argument signatures", () => {
+    expect(getPythonSolutionTemplate(structured, "solution(numbers)")).toContain("def solution(numbers):");
+    expect(getPythonSolutionTemplate(structured, "def solution(numbers, limit):")).toContain("def solution(numbers, limit):");
+  });
+
+  it("rejects test cases with incompatible argument counts", () => {
+    const invalid = JSON.stringify({ format: "structured-v1", cases: [{ id: "a", name: "one", argsJson: "[1]", expectedJson: "1", isVisible: false }, { id: "b", name: "two", argsJson: "[1, 2]", expectedJson: "3", isVisible: false }] });
+    expect(validateStructuredTestArity(invalid, "solution(value)")).toContain("Тест «two» содержит 2 аргументов");
+    expect(normalizeFunctionSignature("def solution(value):")).toBe("solution(value)");
   });
 
   it("returns only marked examples to students", () => {

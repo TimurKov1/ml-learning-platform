@@ -59,6 +59,42 @@ export function buildPythonTestCode(value: string | null | undefined): string {
   }).join("\n\n");
 }
 
+export function normalizeFunctionSignature(signature: string | null | undefined, testsJson?: string | null): string {
+  const raw = signature?.trim();
+  if (raw) {
+    const match = raw.match(/^(?:def\s+)?solution\s*\(([^)]*)\)\s*:?\s*$/);
+    if (!match) throw new Error("Сигнатура должна иметь вид solution(arg1, arg2) или def solution(arg1, arg2):.");
+    const parameters = (match[1] ?? "").split(",").map(parameter => parameter.trim()).filter(Boolean);
+    if (parameters.some(parameter => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(parameter))) throw new Error("Имена параметров должны содержать только латинские буквы, цифры и символ _.");
+    return `solution(${parameters.join(", ")})`;
+  }
+  const structured = parseStructuredPythonTests(testsJson);
+  let argumentCount = 0;
+  if (structured?.cases[0]) {
+    try { const args = JSON.parse(structured.cases[0].argsJson); if (Array.isArray(args)) argumentCount = args.length; } catch { /* fallback to zero arguments */ }
+  }
+  return `solution(${Array.from({ length: argumentCount }, (_, index) => `arg${index + 1}`).join(", ")})`;
+}
+
+export function validateStructuredTestArity(value: string | null | undefined, signature: string | null | undefined): string | null {
+  const structured = parseStructuredPythonTests(value);
+  if (!structured || structured.cases.length < 2) return null;
+  const normalized = normalizeFunctionSignature(signature, value);
+  const expected = normalized.slice(normalized.indexOf("(") + 1, -1).split(",").map(item => item.trim()).filter(Boolean).length;
+  for (const testCase of structured.cases) {
+    try {
+      const args = JSON.parse(testCase.argsJson);
+      if (!Array.isArray(args) || args.length !== expected) return `Тест «${testCase.name}» содержит ${Array.isArray(args) ? args.length : 0} аргументов, а функция ожидает ${expected}.`;
+    } catch { return `Проверьте JSON входных данных теста «${testCase.name}».`; }
+  }
+  return null;
+}
+
+export function getPythonSolutionTemplate(value: string | null | undefined, signature?: string | null): string {
+  const header = normalizeFunctionSignature(signature, value);
+  return `def ${header}:\n    # Напишите решение здесь. Имя solution менять нельзя.\n    pass`;
+}
+
 export function getVisiblePythonExamples(value: string | null | undefined) {
   const structured = parseStructuredPythonTests(value);
   if (!structured) return [];

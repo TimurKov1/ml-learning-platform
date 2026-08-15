@@ -83,10 +83,10 @@ export const adminCourseRouter = router({
     }),
     assignments: router({
       create: adminProcedure
-        .input(z.object({ lessonId: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
+        .input(z.object({ lessonId: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), functionSignature: z.string().trim().max(500).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
         .mutation(({ input }) => addAssignment(input)),
       update: adminProcedure
-        .input(z.object({ id: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
+        .input(z.object({ id: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), functionSignature: z.string().trim().max(500).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
         .mutation(({ input }) => updateAssignment(input.id, input)),
       delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteAssignment(input.id)),
     }),

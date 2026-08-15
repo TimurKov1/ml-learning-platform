@@ -15,7 +15,7 @@ import { hashPassword } from "./auth/password";
 import { ENV } from "./_core/env";
 import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
-import { buildPythonTestCode, getVisiblePythonExamples } from "./pythonTestCases";
+import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -257,11 +257,11 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
     materials,
     assignments: lessonAssignments.map(assignment => {
       const submission = submissionsByAssignment.get(assignment.id);
-      const { testsJson, starterCode, ...studentSafeAssignment } = assignment;
+      const { testsJson, starterCode, functionSignature, ...studentSafeAssignment } = assignment;
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
       const normalizedStudentStatus = !includeUnpublished && assignment.assignmentType === "code" && submission?.status === "pending" && submission.autoCheckResult ? "revision" : submission?.status ?? null;
       const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && normalizedStudentStatus !== "revision" ? null : submission?.response ?? null;
-      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
+      return { ...assignmentData, starterCode: includeUnpublished ? assignment.starterCode : assignment.assignmentType === "code" ? getPythonSolutionTemplate(testsJson, functionSignature) : undefined, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -304,19 +304,23 @@ export async function getStudentMaterialAccessUrl(materialId: number) {
   return { url: material.fileUrl };
 }
 
-type AssignmentWrite = { lessonId: number; title: string; instructions: string; assignmentType?: "manual_file" | "code"; language?: string | null; starterCode?: string | null; testsJson?: string | null; orderIndex: number };
+type AssignmentWrite = { lessonId: number; title: string; instructions: string; assignmentType?: "manual_file" | "code"; language?: string | null; starterCode?: string | null; functionSignature?: string | null; testsJson?: string | null; orderIndex: number };
 
 export async function addAssignment(input: AssignmentWrite) {
+  const arityError = input.assignmentType === "code" ? validateStructuredTestArity(input.testsJson, input.functionSignature) : null;
+  if (arityError) throw new Error(arityError);
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const result = await db.insert(assignments).values({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null });
+  const result = await db.insert(assignments).values({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, functionSignature: input.assignmentType === "code" ? input.functionSignature ?? null : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null });
   return { id: Number(result[0].insertId) };
 }
 
 export async function updateAssignment(id: number, input: Omit<AssignmentWrite, "lessonId">) {
+  const arityError = input.assignmentType === "code" ? validateStructuredTestArity(input.testsJson, input.functionSignature) : null;
+  if (arityError) throw new Error(arityError);
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  await db.update(assignments).set({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null }).where(eq(assignments.id, id));
+  await db.update(assignments).set({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, functionSignature: input.assignmentType === "code" ? input.functionSignature ?? null : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null }).where(eq(assignments.id, id));
   return { success: true };
 }
 

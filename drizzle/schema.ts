@@ -70,6 +70,7 @@ export const assignments = mysqlTable("assignments", {
   assignmentType: mysqlEnum("assignmentType", ["manual_file", "code"]).default("manual_file").notNull(),
   language: varchar("language", { length: 32 }),
   starterCode: text("starterCode"),
+  functionSignature: varchar("functionSignature", { length: 500 }),
   testsJson: text("testsJson"),
   orderIndex: int("orderIndex").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

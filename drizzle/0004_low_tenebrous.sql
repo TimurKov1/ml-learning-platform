@@ -1,0 +1,1 @@
+ALTER TABLE `assignments` ADD `functionSignature` varchar(500);
