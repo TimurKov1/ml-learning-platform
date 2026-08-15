@@ -53,4 +53,14 @@ describe("course routers", () => {
     await expect(caller.materials.open({ materialId: 8 })).resolves.toEqual({ url: "https://signed-storage.example/material.pdf" });
     expect(db.getStudentMaterialAccessUrl).toHaveBeenCalledWith(8);
   });
+
+  it("uploads a manual assignment file before creating the submission", async () => {
+    const storage = await import("../storage");
+    vi.mocked(storage.storagePut).mockResolvedValue({ key: "assignment-submissions/42/work.pdf", url: "https://storage.example/work.pdf" });
+    db.submitAssignment.mockResolvedValue({ success: true, status: "pending" });
+    const caller = studentCourseRouter.createCaller(context("user"));
+    await expect(caller.submitAssignment({ assignmentId: 12, fileName: "work.pdf", contentType: "application/pdf", base64Data: Buffer.from("file").toString("base64") })).resolves.toMatchObject({ success: true });
+    expect(storage.storagePut).toHaveBeenCalledWith(expect.stringContaining("assignment-submissions/42/"), expect.any(Buffer), "application/pdf");
+    expect(db.submitAssignment).toHaveBeenCalledWith(42, 12, expect.objectContaining({ submittedFileName: "work.pdf", submittedFileKey: "assignment-submissions/42/work.pdf" }));
+  });
 });
