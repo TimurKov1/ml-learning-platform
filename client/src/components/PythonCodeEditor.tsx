@@ -13,7 +13,7 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function highlightPython(value: string) {
+export function highlightPython(value: string) {
   let html = "";
   let cursor = 0;
   for (const match of Array.from(value.matchAll(TOKEN_PATTERN))) {
@@ -27,6 +27,38 @@ function highlightPython(value: string) {
   return html + escapeHtml(value.slice(cursor));
 }
 
+export type PythonEditorEdit = { handled: boolean; value: string; cursorStart: number; cursorEnd: number };
+
+export function applyPythonEditorKey(value: string, start: number, end: number, key: string, shiftKey = false): PythonEditorEdit {
+  if (key === "Enter" && start === end) {
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    const currentLine = value.slice(lineStart, start);
+    const indent = currentLine.match(/^\s*/)?.[0] ?? "";
+    const extraIndent = /:\s*(?:#.*)?$/.test(currentLine) ? "    " : "";
+    const insertion = `\n${indent}${extraIndent}`;
+    const next = value.slice(0, start) + insertion + value.slice(end);
+    return { handled: true, value: next, cursorStart: start + insertion.length, cursorEnd: start + insertion.length };
+  }
+  if (key === "Tab") {
+    if (shiftKey) {
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      const removed = value.slice(lineStart, lineStart + 4).match(/^ {1,4}/)?.[0] ?? "";
+      const next = value.slice(0, lineStart) + value.slice(lineStart + removed.length);
+      return { handled: true, value: next, cursorStart: Math.max(lineStart, start - removed.length), cursorEnd: Math.max(lineStart, end - removed.length) };
+    }
+    const next = value.slice(0, start) + "    " + value.slice(end);
+    return { handled: true, value: next, cursorStart: start + 4, cursorEnd: start + 4 };
+  }
+  if (start === end) {
+    const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'" };
+    if (pairs[key]) {
+      const next = value.slice(0, start) + key + pairs[key] + value.slice(end);
+      return { handled: true, value: next, cursorStart: start + 1, cursorEnd: start + 1 };
+    }
+  }
+  return { handled: false, value, cursorStart: start, cursorEnd: end };
+}
+
 export function PythonCodeEditor({ value, onChange, placeholder = "def solution(...):", minHeight = "min-h-64" }: Props) {
   const highlightRef = useRef<HTMLPreElement>(null);
   const handleScroll = (event: React.UIEvent<HTMLTextAreaElement>) => {
@@ -37,38 +69,11 @@ export function PythonCodeEditor({ value, onChange, placeholder = "def solution(
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const target = event.currentTarget;
-    const start = target.selectionStart;
-    const end = target.selectionEnd;
-    if (event.key === "Enter" && start === end) {
-      event.preventDefault();
-      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-      const currentLine = value.slice(lineStart, start);
-      const indent = currentLine.match(/^\s*/)?.[0] ?? "";
-      const extraIndent = /:\s*(?:#.*)?$/.test(currentLine) ? "    " : "";
-      const insertion = `\n${indent}${extraIndent}`;
-      onChange(value.slice(0, start) + insertion + value.slice(end));
-      requestAnimationFrame(() => target.setSelectionRange(start + insertion.length, start + insertion.length));
-      return;
-    }
-    if (event.key === "Tab") {
-      event.preventDefault();
-      if (event.shiftKey) {
-        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-        const removed = value.slice(lineStart, lineStart + 4).match(/^ {1,4}/)?.[0] ?? "";
-        onChange(value.slice(0, lineStart) + value.slice(lineStart + removed.length));
-        requestAnimationFrame(() => target.setSelectionRange(Math.max(lineStart, start - removed.length), Math.max(lineStart, end - removed.length)));
-      } else {
-        onChange(value.slice(0, start) + "    " + value.slice(end));
-        requestAnimationFrame(() => target.setSelectionRange(start + 4, start + 4));
-      }
-      return;
-    }
-    const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'" };
-    if (pairs[event.key] && start === end) {
-      event.preventDefault();
-      onChange(value.slice(0, start) + event.key + pairs[event.key] + value.slice(end));
-      requestAnimationFrame(() => target.setSelectionRange(start + 1, start + 1));
-    }
+    const edit = applyPythonEditorKey(value, target.selectionStart, target.selectionEnd, event.key, event.shiftKey);
+    if (!edit.handled) return;
+    event.preventDefault();
+    onChange(edit.value);
+    requestAnimationFrame(() => target.setSelectionRange(edit.cursorStart, edit.cursorEnd));
   };
   return <div className="relative overflow-hidden rounded-xl border border-[#263d5f] bg-[#102039] shadow-inner">
     <pre ref={highlightRef} aria-hidden="true" className={`pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words p-4 font-mono text-sm leading-6 text-[#edf3fa] ${minHeight}`} dangerouslySetInnerHTML={{ __html: value ? highlightPython(value) : `<span class="text-[#8492a5]">${escapeHtml(placeholder)}</span>` }} />
