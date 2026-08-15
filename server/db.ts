@@ -15,6 +15,7 @@ import { hashPassword } from "./auth/password";
 import { ENV } from "./_core/env";
 import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
+import { buildPythonTestCode, getVisiblePythonExamples } from "./pythonTestCases";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -204,13 +205,26 @@ export async function listCourseSectionsWithLessons(includeUnpublished = false, 
   const db = await getDb();
   if (!db) return [];
   const sections = await db.select().from(courseSections).orderBy(asc(courseSections.orderIndex), asc(courseSections.createdAt));
-  const allLessons = await db.select().from(lessons).orderBy(asc(lessons.orderIndex), asc(lessons.createdAt));
+  const [allLessons, allAssignments] = await Promise.all([
+    db.select().from(lessons).orderBy(asc(lessons.orderIndex), asc(lessons.createdAt)),
+    db.select({ id: assignments.id, lessonId: assignments.lessonId }).from(assignments),
+  ]);
   const visibleLessons = includeUnpublished ? allLessons : allLessons.filter(lesson => lesson.isPublished);
-  const views = studentId ? await db.select().from(lessonViews).where(eq(lessonViews.studentId, studentId)) : [];
+  const [views, submissions] = studentId ? await Promise.all([
+    db.select().from(lessonViews).where(eq(lessonViews.studentId, studentId)),
+    db.select({ assignmentId: assignmentSubmissions.assignmentId }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, studentId), eq(assignmentSubmissions.status, "approved"))),
+  ]) : [[], []] as const;
   const viewedIds = new Set(views.map(view => view.lessonId));
+  const completedAssignmentIds = new Set(submissions.map(submission => submission.assignmentId));
   return sections.map(section => ({
     ...section,
-    lessons: visibleLessons.filter(lesson => lesson.sectionId === section.id).map(lesson => ({ ...lesson, isViewed: viewedIds.has(lesson.id) })),
+    lessons: visibleLessons.filter(lesson => lesson.sectionId === section.id).map(lesson => {
+      const lessonAssignments = allAssignments.filter(assignment => assignment.lessonId === lesson.id);
+      const completedAssignments = lessonAssignments.filter(assignment => completedAssignmentIds.has(assignment.id)).length;
+      const totalAssignments = lessonAssignments.length;
+      const progressPercent = totalAssignments === 0 ? 100 : Math.round((completedAssignments / totalAssignments) * 100);
+      return { ...lesson, isViewed: viewedIds.has(lesson.id), completedAssignments, totalAssignments, progressPercent, isCompleted: progressPercent === 100 };
+    }),
   }));
 }
 
@@ -245,7 +259,7 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
       const submission = submissionsByAssignment.get(assignment.id);
       const { testsJson, ...studentSafeAssignment } = assignment;
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
-      return { ...assignmentData, isCompleted: submission?.status === "approved", response: submission?.response ?? null, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
+      return { ...assignmentData, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: submission?.response ?? null, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -328,7 +342,7 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   const isCode = assignment[0].assignmentType === "code";
   if (isCode && !input.response?.trim()) throw new Error("Добавьте Python-код перед отправкой.");
   if (!isCode && !input.submittedFileKey) throw new Error("Прикрепите файл перед отправкой.");
-  const autoCheck = isCode ? await runPythonChecks(input.response!, assignment[0].testsJson ?? "") : null;
+  const autoCheck = isCode ? await runPythonChecks(input.response!, buildPythonTestCode(assignment[0].testsJson)) : null;
   const status = autoCheck?.passed ? "approved" : "pending";
   await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
   return { success: true, status, autoCheck };
