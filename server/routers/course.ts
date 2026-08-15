@@ -39,7 +39,7 @@ const lessonInput = z
     const hasText = Boolean(value.textContent?.trim());
     const hasVideo = Boolean(value.videoUrl?.trim());
     const expectedMode = hasText && hasVideo ? "mixed" : hasVideo ? "video" : hasText ? "text" : null;
-    if (expectedMode !== value.contentMode) {
+    if ((expectedMode && expectedMode !== value.contentMode) || (!expectedMode && value.isPublished)) {
       ctx.addIssue({ code: "custom", message: "Формат урока должен соответствовать заполненному контенту.", path: ["contentMode"] });
     }
   });
@@ -83,10 +83,10 @@ export const adminCourseRouter = router({
     }),
     assignments: router({
       create: adminProcedure
-        .input(z.object({ lessonId: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), orderIndex: z.number().int().min(0).max(10_000) }))
+        .input(z.object({ lessonId: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
         .mutation(({ input }) => addAssignment(input)),
       update: adminProcedure
-        .input(z.object({ id: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), orderIndex: z.number().int().min(0).max(10_000) }))
+        .input(z.object({ id: z.number().int().positive(), title: z.string().trim().min(2).max(180), instructions: z.string().trim().min(2).max(10_000), assignmentType: z.enum(["manual_file", "code"]).default("manual_file"), language: z.string().trim().max(32).optional().nullable(), starterCode: z.string().max(30_000).optional().nullable(), testsJson: z.string().max(50_000).optional().nullable(), orderIndex: z.number().int().min(0).max(10_000) }))
         .mutation(({ input }) => updateAssignment(input.id, input)),
       delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteAssignment(input.id)),
     }),
@@ -103,8 +103,22 @@ export const studentCourseRouter = router({
   progress: studentProcedure.query(({ ctx }) => listStudentProgress(ctx.user.id)),
   markViewed: studentProcedure.input(z.object({ lessonId: z.number().int().positive() })).mutation(({ input, ctx }) => markLessonViewed(ctx.user.id, input.lessonId)),
   submitAssignment: studentProcedure
-    .input(z.object({ assignmentId: z.number().int().positive(), response: z.string().trim().min(1, "Добавьте ответ перед отправкой.").max(20_000) }))
-    .mutation(({ input, ctx }) => submitAssignment(ctx.user.id, input.assignmentId, input.response)),
+    .input(z.object({ assignmentId: z.number().int().positive(), response: z.string().max(30_000).optional(), fileName: z.string().trim().min(1).max(180).optional(), contentType: z.string().trim().min(1).max(100).optional(), base64Data: z.string().min(1).max(14_000_000).optional() }))
+    .mutation(async ({ input, ctx }) => {
+      let submittedFileName: string | null = null;
+      let submittedFileUrl: string | null = null;
+      let submittedFileKey: string | null = null;
+      if (input.base64Data && input.fileName && input.contentType) {
+        const bytes = Buffer.from(input.base64Data, "base64");
+        if (bytes.length > 10 * 1024 * 1024) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Размер файла не должен превышать 10 МБ." });
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const stored = await storagePut(`assignment-submissions/${ctx.user.id}/${Date.now()}-${safeName}`, bytes, input.contentType);
+        submittedFileName = input.fileName;
+        submittedFileUrl = stored.url;
+        submittedFileKey = stored.key;
+      }
+      return submitAssignment(ctx.user.id, input.assignmentId, { response: input.response, submittedFileName, submittedFileUrl, submittedFileKey });
+    }),
   materials: router({
     open: studentProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ input }) => {
       const material = await getStudentMaterialAccessUrl(input.materialId);

@@ -39,7 +39,12 @@ describe("course routers", () => {
     await expect(caller.submitAssignment({ assignmentId: 11, response: "Ссылка на решение" })).resolves.toEqual({ success: true });
     expect(db.getLessonDetail).toHaveBeenCalledWith(3, false, 42);
     expect(db.markLessonViewed).toHaveBeenCalledWith(42, 3);
-    expect(db.submitAssignment).toHaveBeenCalledWith(42, 11, "Ссылка на решение");
+    expect(db.submitAssignment).toHaveBeenCalledWith(42, 11, {
+      response: "Ссылка на решение",
+      submittedFileName: null,
+      submittedFileUrl: null,
+      submittedFileKey: null,
+    });
   });
 
   it("returns an authenticated file URL only for a student material request", async () => {

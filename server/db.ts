@@ -14,6 +14,7 @@ import {
 import { hashPassword } from "./auth/password";
 import { ENV } from "./_core/env";
 import { storageGetSignedUrl } from "./storage";
+import { runPythonChecks } from "./pythonCodeRunner";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -242,7 +243,9 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
     materials,
     assignments: lessonAssignments.map(assignment => {
       const submission = submissionsByAssignment.get(assignment.id);
-      return { ...assignment, isCompleted: submission?.status === "approved", response: submission?.response ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
+      const { testsJson, ...studentSafeAssignment } = assignment;
+      const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
+      return { ...assignmentData, isCompleted: submission?.status === "approved", response: submission?.response ?? null, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: submission?.status ?? null, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -285,17 +288,19 @@ export async function getStudentMaterialAccessUrl(materialId: number) {
   return { url: material.fileUrl };
 }
 
-export async function addAssignment(input: { lessonId: number; title: string; instructions: string; orderIndex: number }) {
+type AssignmentWrite = { lessonId: number; title: string; instructions: string; assignmentType?: "manual_file" | "code"; language?: string | null; starterCode?: string | null; testsJson?: string | null; orderIndex: number };
+
+export async function addAssignment(input: AssignmentWrite) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const result = await db.insert(assignments).values(input);
+  const result = await db.insert(assignments).values({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null });
   return { id: Number(result[0].insertId) };
 }
 
-export async function updateAssignment(id: number, input: { title: string; instructions: string; orderIndex: number }) {
+export async function updateAssignment(id: number, input: Omit<AssignmentWrite, "lessonId">) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  await db.update(assignments).set(input).where(eq(assignments.id, id));
+  await db.update(assignments).set({ ...input, assignmentType: input.assignmentType ?? "manual_file", language: input.assignmentType === "code" ? "python" : null, starterCode: input.assignmentType === "code" ? input.starterCode ?? "" : null, testsJson: input.assignmentType === "code" ? input.testsJson ?? "" : null }).where(eq(assignments.id, id));
   return { success: true };
 }
 
@@ -315,13 +320,18 @@ export async function markLessonViewed(studentId: number, lessonId: number) {
   return { success: true };
 }
 
-export async function submitAssignment(studentId: number, assignmentId: number, response: string) {
+export async function submitAssignment(studentId: number, assignmentId: number, input: { response?: string; submittedFileName?: string | null; submittedFileUrl?: string | null; submittedFileKey?: string | null }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const assignment = await db.select({ id: assignments.id, isPublished: lessons.isPublished }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
+  const assignment = await db.select({ id: assignments.id, isPublished: lessons.isPublished, assignmentType: assignments.assignmentType, testsJson: assignments.testsJson }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
   if (!assignment[0]?.isPublished) throw new Error("Assignment is unavailable");
-  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response, status: "pending" }).onDuplicateKeyUpdate({ set: { response, status: "pending", reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
-  return { success: true, status: "pending" as const };
+  const isCode = assignment[0].assignmentType === "code";
+  if (isCode && !input.response?.trim()) throw new Error("Добавьте Python-код перед отправкой.");
+  if (!isCode && !input.submittedFileKey) throw new Error("Прикрепите файл перед отправкой.");
+  const autoCheck = isCode ? await runPythonChecks(input.response!, assignment[0].testsJson ?? "") : null;
+  const status = autoCheck?.passed ? "approved" : "pending";
+  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
+  return { success: true, status, autoCheck };
 }
 
 export async function listStudentProgress(studentId: number) {
@@ -351,6 +361,10 @@ export async function listAssignmentSubmissionsForReview() {
       assignmentId: assignments.id,
       assignmentTitle: assignments.title,
       assignmentInstructions: assignments.instructions,
+      assignmentType: assignments.assignmentType,
+      submittedFileName: assignmentSubmissions.submittedFileName,
+      submittedFileKey: assignmentSubmissions.submittedFileKey,
+      autoCheckResult: assignmentSubmissions.autoCheckResult,
       lessonTitle: lessons.title,
       sectionTitle: courseSections.title,
     })
@@ -360,6 +374,14 @@ export async function listAssignmentSubmissionsForReview() {
     .innerJoin(lessons, eq(assignments.lessonId, lessons.id))
     .innerJoin(courseSections, eq(lessons.sectionId, courseSections.id))
     .orderBy(desc(assignmentSubmissions.updatedAt));
+}
+
+export async function getSubmissionFileAccessUrl(submissionId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const result = await db.select({ fileKey: assignmentSubmissions.submittedFileKey }).from(assignmentSubmissions).where(eq(assignmentSubmissions.id, submissionId)).limit(1);
+  if (!result[0]?.fileKey) return null;
+  return { url: await storageGetSignedUrl(result[0].fileKey) };
 }
 
 export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; reviewComment: string | null; reviewerId: number }) {
