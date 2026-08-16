@@ -159,6 +159,31 @@ export async function getStudentStats() {
   }));
 }
 
+export async function getStudentLeaderboard(currentStudentId: number) {
+  const db = await getDb();
+  if (!db) return { totalAssignments: 0, entries: [], currentStudent: null };
+  const [students, courseAssignments] = await Promise.all([
+    listStudentAccounts(),
+    db.select({ id: assignments.id }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(lessons.isPublished, true)),
+  ]);
+  const totalAssignments = courseAssignments.length;
+  const rows = await Promise.all(students.map(async student => {
+    const completed = await db.select({ total: count() }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, student.id), eq(assignmentSubmissions.status, "approved")));
+    const completedAssignments = Math.min(completed[0]?.total ?? 0, totalAssignments);
+    return {
+      studentId: student.id,
+      name: student.name?.trim() || student.username || "Ученик",
+      completedAssignments,
+      totalAssignments,
+      progressPercent: totalAssignments === 0 ? 100 : Math.round((completedAssignments / totalAssignments) * 100),
+      isCurrentStudent: student.id === currentStudentId,
+    };
+  }));
+  rows.sort((a, b) => b.completedAssignments - a.completedAssignments || b.progressPercent - a.progressPercent || a.name.localeCompare(b.name, "ru"));
+  const entries = rows.map((row, index) => ({ ...row, rank: index + 1 }));
+  return { totalAssignments, entries, currentStudent: entries.find(entry => entry.isCurrentStudent) ?? null };
+}
+
 export async function createCourseSection(input: { title: string; description?: string | null; orderIndex: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");

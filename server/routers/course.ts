@@ -11,6 +11,7 @@ import {
   deleteLessonMaterial,
   getLessonDetail,
   getStudentMaterialAccessUrl,
+  getStudentLeaderboard,
   listAdminLessons,
   listCourseSectionsWithLessons,
   listStudentProgress,
@@ -104,6 +105,7 @@ export const studentCourseRouter = router({
     return lesson;
   }),
   progress: studentProcedure.query(({ ctx }) => listStudentProgress(ctx.user.id)),
+  leaderboard: studentProcedure.query(({ ctx }) => getStudentLeaderboard(ctx.user.id)),
   markViewed: studentProcedure.input(z.object({ lessonId: z.number().int().positive() })).mutation(({ input, ctx }) => markLessonViewed(ctx.user.id, input.lessonId)),
   submitAssignment: studentProcedure
     .input(z.object({ assignmentId: z.number().int().positive(), response: z.string().max(30_000).optional(), fileName: z.string().trim().min(1).max(180).optional(), contentType: z.string().trim().min(1).max(100).optional(), base64Data: z.string().min(1).max(14_000_000).optional() }))

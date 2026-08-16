@@ -6,7 +6,7 @@ import { LessonMarkdown } from "@/components/LessonMarkdown";
 import "katex/dist/katex.min.css";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, ArrowRight, BookOpenText, Check, CheckCircle2, ChevronRight, CirclePlay, ClipboardCheck, Code2, FileText, Loader2, LogOut, PlayCircle, Send, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpenText, Check, CheckCircle2, ChevronRight, CirclePlay, ClipboardCheck, Code2, FileText, Loader2, LogOut, Medal, PlayCircle, Send, Sparkles, Trophy, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -15,14 +15,18 @@ type CurriculumSection = { id: number; title: string; description: string | null
 type PublicTest = { name: string; argsJson: string; expectedJson: string };
 type LessonDetail = { id: number; title: string; summary: string | null; textContent: string | null; videoUrl: string | null; materials: Array<{ id: number; title: string; fileUrl: string; sourceType: "file" | "link" }>; assignments: Array<{ id: number; title: string; instructions: string; assignmentType: "manual_file" | "code"; starterCode?: string | null; publicTests?: PublicTest[]; isCompleted: boolean; response: string | null; submittedFileName: string | null; autoCheckResult: string | null; submissionStatus: "pending" | "approved" | "revision" | null; reviewComment: string | null }> };
 type LessonQuery = { isLoading: boolean; error: unknown; data?: LessonDetail; refetch: () => Promise<unknown> };
+type LeaderboardEntry = { studentId: number; name: string; completedAssignments: number; totalAssignments: number; progressPercent: number; isCurrentStudent: boolean; rank: number };
+type LeaderboardData = { totalAssignments: number; entries: LeaderboardEntry[]; currentStudent: LeaderboardEntry | null };
 
 export default function StudentWorkspace() {
   const { user, logout } = useAuth();
   const curriculum = trpc.student.curriculum.useQuery();
   const progress = trpc.student.progress.useQuery();
   const [activeLessonId, setActiveLessonId] = useState<number | null>(null);
+  const [activeView, setActiveView] = useState<"curriculum" | "ranking">("curriculum");
   const [responses, setResponses] = useState<Record<number, string>>({});
   const lesson = trpc.student.lesson.useQuery({ id: activeLessonId ?? 0 }, { enabled: Boolean(activeLessonId) });
+  const leaderboard = trpc.student.leaderboard.useQuery(undefined, { enabled: activeView === "ranking" && !activeLessonId });
   const markViewed = trpc.student.markViewed.useMutation({ onSuccess: async () => { await Promise.all([curriculum.refetch(), progress.refetch()]); } });
   const submit = trpc.student.submitAssignment.useMutation({ onSuccess: async result => { if (result.status === "approved") toast.success("Все тесты пройдены — задание зачтено."); else if (result.autoCheck) toast.error("Тесты не пройдены. Исправьте код и отправьте его повторно."); else toast.success("Файл отправлен преподавателю на проверку."); await Promise.all([lesson.refetch(), curriculum.refetch(), progress.refetch()]); }, onError: error => toast.error(error.message) });
   const openMaterial = trpc.student.materials.open.useMutation();
@@ -33,7 +37,67 @@ export default function StudentWorkspace() {
   if (activeLessonId) return <LessonPage userName={user?.name || user?.username || "Ученик"} lesson={lesson} responses={responses} setResponses={setResponses} onBack={() => setActiveLessonId(null)} onOpenMaterial={open} onSubmit={async (assignmentId, payload) => { const file = payload.file; submit.mutate({ assignmentId, response: payload.response, fileName: file?.name, contentType: file?.type || "application/octet-stream", base64Data: file ? await fileToBase64(file) : undefined }); }} submitting={submit.isPending} onLogout={() => logout()} />;
   if (curriculum.isLoading || progress.isLoading) return <LoadingScreen />;
   if (curriculum.error || progress.error) return <ErrorScreen onRetry={() => { void Promise.all([curriculum.refetch(), progress.refetch()]); }} />;
-  return <main className="min-h-screen bg-[#f7f4ee] text-[#13223d]"><StudentHeader name={user?.name || user?.username || "Ученик"} onLogout={() => logout()} /><section className="mx-auto max-w-6xl px-5 pb-16 pt-10 sm:px-8 sm:pt-14"><div className="grid gap-8 lg:grid-cols-[1fr_300px]"><div><div className="max-w-2xl"><p className="text-xs font-bold tracking-[.17em] text-[#a47d3a] uppercase">Учебное пространство</p><h1 className="mt-3 font-display text-4xl tracking-[-.05em] sm:text-5xl">Ваш путь в ML.</h1><p className="mt-4 text-base leading-7 text-[#69748a]">Прогресс каждого урока зависит от зачтённых практических заданий.</p></div><div className="mt-9 space-y-5">{sections.length === 0 ? <EmptyCurriculum /> : sections.map((section, sectionIndex) => <section key={section.id} className="overflow-hidden rounded-3xl border border-[#e3ddd2] bg-white shadow-[0_12px_30px_rgba(30,41,60,.04)]"><div className="flex items-start gap-4 border-b border-[#eee9e1] bg-[#fcfbf8] px-5 py-5 sm:px-6"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#efe7da] text-sm font-bold text-[#896726]">{String(sectionIndex + 1).padStart(2, "0")}</span><div><h2 className="text-lg font-semibold">{section.title}</h2>{section.description && <p className="mt-1 text-sm leading-6 text-[#748095]">{section.description}</p>}</div></div><div className="divide-y divide-[#f0ece5]">{section.lessons.length === 0 ? <p className="px-6 py-5 text-sm text-[#8b95a6]">Уроки в этом разделе появятся позже.</p> : section.lessons.map((item, index) => <LessonListItem key={item.id} item={item} index={index} onOpen={() => setActiveLessonId(item.id)} />)}</div></section>)}</div></div><aside className="lg:pt-16"><div className="rounded-3xl bg-[#142440] p-6 text-white"><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#ddc48f] uppercase"><Sparkles className="h-3.5 w-3.5" />ваш прогресс</p><p className="mt-5 font-display text-5xl tracking-[-.06em]">{totals.lessons ? Math.round((totals.completedLessons / totals.lessons) * 100) : 0}%</p><div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#ddc48f] transition-all" style={{ width: `${totals.lessons ? (totals.completedLessons / totals.lessons) * 100 : 0}%` }} /></div><div className="mt-7 space-y-4 border-t border-white/10 pt-5"><Stat label="Пройдено уроков" value={`${totals.completedLessons} / ${totals.lessons}`} /><Stat label="Зачтено заданий" value={String(totals.assignments)} /></div></div><div className="mt-5 rounded-3xl border border-[#e3ddd2] bg-white p-6"><h2 className="text-sm font-semibold">Как считается прогресс</h2><p className="mt-3 text-sm leading-6 text-[#748095]">Урок считается пройденным, когда зачтены все задания. Урок без заданий отмечается как пройденный сразу.</p></div></aside></div></section></main>;
+  const studentName = user?.name || user?.username || "Ученик";
+  if (activeView === "ranking") return <main className="min-h-screen bg-[#f7f4ee] text-[#13223d]"><StudentHeader name={studentName} onLogout={() => logout()} /><StudentTabs activeView={activeView} onChange={setActiveView} /><LeaderboardPage query={leaderboard} /></main>;
+  return <main className="min-h-screen bg-[#f7f4ee] text-[#13223d]"><StudentHeader name={studentName} onLogout={() => logout()} /><StudentTabs activeView={activeView} onChange={setActiveView} /><section className="mx-auto max-w-6xl px-5 pb-16 pt-10 sm:px-8 sm:pt-14"><div className="grid gap-8 lg:grid-cols-[1fr_300px]"><div><div className="max-w-2xl"><p className="text-xs font-bold tracking-[.17em] text-[#a47d3a] uppercase">Учебное пространство</p><h1 className="mt-3 font-display text-4xl tracking-[-.05em] sm:text-5xl">Ваш путь в ML.</h1><p className="mt-4 text-base leading-7 text-[#69748a]">Прогресс каждого урока зависит от зачтённых практических заданий.</p></div><div className="mt-9 space-y-5">{sections.length === 0 ? <EmptyCurriculum /> : sections.map((section, sectionIndex) => <section key={section.id} className="overflow-hidden rounded-3xl border border-[#e3ddd2] bg-white shadow-[0_12px_30px_rgba(30,41,60,.04)]"><div className="flex items-start gap-4 border-b border-[#eee9e1] bg-[#fcfbf8] px-5 py-5 sm:px-6"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#efe7da] text-sm font-bold text-[#896726]">{String(sectionIndex + 1).padStart(2, "0")}</span><div><h2 className="text-lg font-semibold">{section.title}</h2>{section.description && <p className="mt-1 text-sm leading-6 text-[#748095]">{section.description}</p>}</div></div><div className="divide-y divide-[#f0ece5]">{section.lessons.length === 0 ? <p className="px-6 py-5 text-sm text-[#8b95a6]">Уроки в этом разделе появятся позже.</p> : section.lessons.map((item, index) => <LessonListItem key={item.id} item={item} index={index} onOpen={() => setActiveLessonId(item.id)} />)}</div></section>)}</div></div><aside className="lg:pt-16"><div className="rounded-3xl bg-[#142440] p-6 text-white"><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#ddc48f] uppercase"><Sparkles className="h-3.5 w-3.5" />ваш прогресс</p><p className="mt-5 font-display text-5xl tracking-[-.06em]">{totals.lessons ? Math.round((totals.completedLessons / totals.lessons) * 100) : 0}%</p><div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#ddc48f] transition-all" style={{ width: `${totals.lessons ? (totals.completedLessons / totals.lessons) * 100 : 0}%` }} /></div><div className="mt-7 space-y-4 border-t border-white/10 pt-5"><Stat label="Пройдено уроков" value={`${totals.completedLessons} / ${totals.lessons}`} /><Stat label="Зачтено заданий" value={String(totals.assignments)} /></div></div><div className="mt-5 rounded-3xl border border-[#e3ddd2] bg-white p-6"><h2 className="text-sm font-semibold">Как считается прогресс</h2><p className="mt-3 text-sm leading-6 text-[#748095]">Урок считается пройденным, когда зачтены все задания. Урок без заданий отмечается как пройденный сразу.</p></div></aside></div></section></main>;
+}
+
+function StudentTabs({ activeView, onChange }: { activeView: "curriculum" | "ranking"; onChange: (view: "curriculum" | "ranking") => void }) {
+  return <div className="mx-auto flex max-w-6xl gap-2 px-5 pt-6 sm:px-8"><button type="button" onClick={() => onChange("curriculum")} className={`rounded-full px-4 py-2 text-sm font-semibold transition ${activeView === "curriculum" ? "bg-[#142440] text-white shadow-sm" : "bg-white text-[#69748a] hover:bg-[#eee8dd]"}`}><BookOpenText className="mr-2 inline h-4 w-4" />Моя программа</button><button type="button" onClick={() => onChange("ranking")} className={`rounded-full px-4 py-2 text-sm font-semibold transition ${activeView === "ranking" ? "bg-[#142440] text-white shadow-sm" : "bg-white text-[#69748a] hover:bg-[#eee8dd]"}`}><Trophy className="mr-2 inline h-4 w-4" />Рейтинг</button></div>;
+}
+
+function LeaderboardPage({ query }: { query: { isLoading: boolean; error: unknown; data?: LeaderboardData; refetch?: () => Promise<unknown> } }) {
+  if (query.isLoading) return <LoadingScreen />;
+  if (query.error || !query.data) return <ErrorScreen onRetry={() => { void query.refetch?.(); }} />;
+  const { entries, currentStudent, totalAssignments } = query.data;
+  const podium = entries.slice(0, 3);
+  return (
+    <section className="mx-auto max-w-6xl px-5 pb-16 pt-8 sm:px-8 sm:pt-10">
+      <div className="max-w-2xl">
+        <p className="text-xs font-bold tracking-[.17em] text-[#a47d3a] uppercase">Мотивация и прогресс</p>
+        <h1 className="mt-3 font-display text-4xl tracking-[-.05em] sm:text-5xl">Рейтинг учеников.</h1>
+        <p className="mt-4 text-base leading-7 text-[#69748a]">Место определяется количеством зачтённых заданий и общим прогрессом курса.</p>
+      </div>
+      {currentStudent && (
+        <div className="mt-8 rounded-3xl bg-[#142440] p-6 text-white shadow-[0_15px_35px_rgba(20,36,64,.16)] sm:flex sm:items-center sm:justify-between">
+          <div><p className="text-xs font-bold tracking-[.16em] text-[#ddc48f] uppercase">Ваше место</p><p className="mt-2 font-display text-5xl tracking-[-.06em]">#{currentStudent.rank}</p></div>
+          <div className="mt-5 grid grid-cols-2 gap-6 border-t border-white/10 pt-5 sm:mt-0 sm:border-l sm:border-t-0 sm:pl-8 sm:pt-0">
+            <div><p className="text-xs text-[#afbdd0]">Зачтено заданий</p><p className="mt-1 text-xl font-semibold">{currentStudent.completedAssignments} / {totalAssignments}</p></div>
+            <div><p className="text-xs text-[#afbdd0]">Прогресс курса</p><p className="mt-1 text-xl font-semibold text-[#ddc48f]">{currentStudent.progressPercent}%</p></div>
+          </div>
+        </div>
+      )}
+      {entries.length === 0 ? (
+        <div className="mt-8 rounded-3xl border border-dashed border-[#d8d2c7] bg-white px-6 py-14 text-center"><Trophy className="mx-auto h-8 w-8 text-[#b0893e]" /><h2 className="mt-4 text-lg font-semibold">Рейтинг пока пуст</h2><p className="mt-2 text-sm text-[#758095]">Как только появятся ученики, здесь появится таблица лидеров.</p></div>
+      ) : (
+        <>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {podium.map(entry => (
+              <article key={entry.studentId} className={`rounded-3xl border p-5 ${entry.isCurrentStudent ? "border-[#c9ab68] bg-[#fffaf0]" : "border-[#e3ddd2] bg-white"}`}>
+                <div className="flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#efe7da] text-[#896726]"><Medal className="h-5 w-5" /></span><span className="font-display text-3xl text-[#a47d3a]">#{entry.rank}</span></div>
+                <h2 className="mt-5 truncate font-semibold">{entry.name}{entry.isCurrentStudent && <span className="ml-2 text-xs font-normal text-[#a47d3a]">вы</span>}</h2>
+                <p className="mt-2 text-sm text-[#69748a]">{entry.completedAssignments} из {entry.totalAssignments} заданий</p>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#ede8de]"><div className="h-full rounded-full bg-[#c5a35e]" style={{ width: `${entry.progressPercent}%` }} /></div>
+                <p className="mt-2 text-right text-xs font-semibold text-[#8b682a]">{entry.progressPercent}%</p>
+              </article>
+            ))}
+          </div>
+          <div className="mt-8 overflow-hidden rounded-3xl border border-[#e3ddd2] bg-white shadow-[0_12px_30px_rgba(30,41,60,.04)]">
+            <div className="border-b border-[#eee9e1] bg-[#fcfbf8] px-5 py-4 sm:px-6"><h2 className="font-semibold">Все участники</h2><p className="mt-1 text-xs text-[#8a94a4]">Считаются только зачтённые задания.</p></div>
+            <div className="divide-y divide-[#f0ece5]">
+              {entries.map(entry => (
+                <div key={entry.studentId} className={`flex items-center gap-3 px-5 py-4 sm:px-6 ${entry.isCurrentStudent ? "bg-[#fffaf0]" : ""}`}>
+                  <span className="w-8 text-center font-display text-xl text-[#a47d3a]">{entry.rank}</span>
+                  <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}{entry.isCurrentStudent && <span className="ml-2 rounded-full bg-[#efe7da] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8b682a]">Вы</span>}</p><div className="mt-2 h-1.5 max-w-sm overflow-hidden rounded-full bg-[#ede8de]"><div className="h-full rounded-full bg-[#c5a35e]" style={{ width: `${entry.progressPercent}%` }} /></div></div>
+                  <div className="text-right"><p className="text-sm font-semibold text-[#263652]">{entry.completedAssignments}/{entry.totalAssignments}</p><p className="mt-1 text-xs text-[#8a94a4]">{entry.progressPercent}%</p></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function LessonListItem({ item, index, onOpen }: { item: ProgressLesson; index: number; onOpen: () => void }) { return <button onClick={onOpen} className="group flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-[#faf8f3] sm:px-6"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border ${item.isCompleted ? "border-[#b9d8c1] bg-[#e7f1e9] text-[#387553]" : "border-[#ddd7cb] text-[#8a94a4]"}`}>{item.isCompleted ? <Check className="h-4 w-4" /> : <span className="text-xs font-semibold">{index + 1}</span>}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium group-hover:text-[#8b682a]">{item.title}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${item.isCompleted ? "bg-[#e7f1e9] text-[#387553]" : "bg-[#f3efe8] text-[#7c6d52]"}`}>{item.isCompleted ? "Пройден" : `${item.progressPercent}%`}</span></div>{item.summary && <p className="mt-1 truncate text-sm text-[#7b8598]">{item.summary}</p>}<div className="mt-2 flex items-center gap-3"><div className="h-1.5 min-w-20 max-w-48 flex-1 overflow-hidden rounded-full bg-[#ebe6dc]"><div className={`h-full rounded-full ${item.isCompleted ? "bg-[#4b8a60]" : "bg-[#c5a35e]"}`} style={{ width: `${item.progressPercent}%` }} /></div><span className="text-[11px] text-[#8a94a4]">{item.completedAssignments}/{item.totalAssignments} заданий</span></div></div><LessonFormat mode={item.contentMode} /><ChevronRight className="h-4 w-4 text-[#a0a8b5] transition group-hover:translate-x-0.5 group-hover:text-[#775e2c]" /></button>; }
