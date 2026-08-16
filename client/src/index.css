@@ -67,3 +67,36 @@
 
 .font-display { font-family: "Playfair Display", Georgia, serif; }
 .login-stage { background: linear-gradient(135deg, #e9e2d6 0%, #dce4e8 52%, #eee4d5 100%); }
+
+@layer components {
+  .lesson-prose .katex-display {
+    margin: 1.5rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0.1rem;
+  }
+
+  .lesson-prose .katex-display > .katex {
+    white-space: normal;
+  }
+
+  .lesson-prose .katex,
+  .lesson-prose .katex * {
+    font-family: KaTeX_Main, "Times New Roman", serif;
+  }
+
+  .lesson-prose :not(pre) > code {
+    border-radius: 0.35rem;
+    background: #f0ece4;
+    padding: 0.12rem 0.35rem;
+    color: #263652;
+  }
+
+  .lesson-prose pre {
+    overflow-x: auto;
+    border-radius: 1rem;
+    background: #142440;
+    padding: 1rem;
+    color: #f8f4eb;
+  }
+}
