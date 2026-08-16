@@ -14,6 +14,9 @@ import {
   listAdminLessons,
   listCourseSectionsWithLessons,
   listStudentProgress,
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
   markLessonViewed,
   submitAssignment,
   updateAssignment,
@@ -119,6 +122,11 @@ export const studentCourseRouter = router({
       }
       return submitAssignment(ctx.user.id, input.assignmentId, { response: input.response, submittedFileName, submittedFileUrl, submittedFileKey });
     }),
+  notifications: router({
+    list: studentProcedure.query(({ ctx }) => listNotifications(ctx.user.id)),
+    markRead: studentProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input, ctx }) => markNotificationRead(ctx.user.id, input.id)),
+    markAllRead: studentProcedure.mutation(({ ctx }) => markAllNotificationsRead(ctx.user.id)),
+  }),
   materials: router({
     open: studentProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ input }) => {
       const material = await getStudentMaterialAccessUrl(input.materialId);

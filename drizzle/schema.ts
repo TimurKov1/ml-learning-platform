@@ -99,3 +99,15 @@ export const assignmentSubmissions = mysqlTable("assignment_submissions", {
   completedAt: timestamp("completedAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [uniqueIndex("assignment_submissions_student_assignment_unique").on(table.studentId, table.assignmentId)]);
+
+
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  recipientUserId: int("recipientUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 64 }).notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  message: text("message").notNull(),
+  link: varchar("link", { length: 255 }),
+  isRead: boolean("isRead").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [index("notifications_recipient_read_idx").on(table.recipientUserId, table.isRead), index("notifications_created_idx").on(table.createdAt)]);

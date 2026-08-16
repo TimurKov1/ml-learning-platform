@@ -9,12 +9,14 @@ import {
   lessonMaterials,
   lessons,
   lessonViews,
+  notifications,
   users,
 } from "../drizzle/schema";
 import { hashPassword } from "./auth/password";
 import { ENV } from "./_core/env";
 import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
+import { autoCheckMessage, reviewMessage, submissionReceivedMessage } from "./notificationContent";
 import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -343,7 +345,7 @@ export async function markLessonViewed(studentId: number, lessonId: number) {
 export async function submitAssignment(studentId: number, assignmentId: number, input: { response?: string; submittedFileName?: string | null; submittedFileUrl?: string | null; submittedFileKey?: string | null }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const assignment = await db.select({ id: assignments.id, isPublished: lessons.isPublished, assignmentType: assignments.assignmentType, testsJson: assignments.testsJson }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
+  const assignment = await db.select({ id: assignments.id, title: assignments.title, lessonTitle: lessons.title, isPublished: lessons.isPublished, assignmentType: assignments.assignmentType, testsJson: assignments.testsJson }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
   if (!assignment[0]?.isPublished) throw new Error("Assignment is unavailable");
   const isCode = assignment[0].assignmentType === "code";
   if (isCode && !input.response?.trim()) throw new Error("Добавьте Python-код перед отправкой.");
@@ -351,6 +353,12 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   const autoCheck = isCode ? await runPythonChecks(input.response!, buildPythonTestCode(assignment[0].testsJson)) : null;
   const status = isCode ? (autoCheck?.passed ? "approved" : "revision") : "pending";
   await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
+  const student = await db.select({ name: users.name }).from(users).where(eq(users.id, studentId)).limit(1);
+  const admins = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin"));
+  await Promise.all(admins.map(admin => createNotification({ recipientUserId: admin.id, kind: "submission_received", title: "Новое решение ученика", message: submissionReceivedMessage(student[0]?.name ?? "Ученик", assignment[0].title), link: "reviews" })));
+  if (isCode) {
+    await createNotification({ recipientUserId: studentId, kind: status === "approved" ? "submission_approved" : "submission_revision", title: status === "approved" ? "Решение зачтено" : "Нужна доработка решения", message: autoCheckMessage(assignment[0].title, status === "approved"), link: `lesson/${assignment[0].lessonTitle}` });
+  }
   return { success: true, status, autoCheck };
 }
 
@@ -407,6 +415,38 @@ export async function getSubmissionFileAccessUrl(submissionId: number) {
 export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; reviewComment: string | null; reviewerId: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
+  const existing = await db.select({ studentId: assignmentSubmissions.studentId, assignmentTitle: assignments.title }).from(assignmentSubmissions).innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id)).where(eq(assignmentSubmissions.id, input.id)).limit(1);
   await db.update(assignmentSubmissions).set({ status: input.status, reviewComment: input.reviewComment, reviewedAt: new Date(), reviewedById: input.reviewerId }).where(eq(assignmentSubmissions.id, input.id));
+  if (existing[0]) {
+    await createNotification({ recipientUserId: existing[0].studentId, kind: input.status === "approved" ? "submission_approved" : "submission_revision", title: input.status === "approved" ? "Решение зачтено" : "Решение отправлено на доработку", message: reviewMessage(existing[0].assignmentTitle, input.status, input.reviewComment), link: "dashboard" });
+  }
+  return { success: true };
+}
+
+
+export async function createNotification(input: { recipientUserId: number; kind: string; title: string; message: string; link?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const result = await db.insert(notifications).values({ ...input, link: input.link ?? null });
+  return { id: Number(result[0].insertId) };
+}
+
+export async function listNotifications(recipientUserId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(notifications).where(eq(notifications.recipientUserId, recipientUserId)).orderBy(desc(notifications.createdAt)).limit(50);
+}
+
+export async function markNotificationRead(recipientUserId: number, id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(notifications).set({ isRead: true }).where(and(eq(notifications.id, id), eq(notifications.recipientUserId, recipientUserId)));
+  return { success: true };
+}
+
+export async function markAllNotificationsRead(recipientUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(notifications).set({ isRead: true }).where(and(eq(notifications.recipientUserId, recipientUserId), eq(notifications.isRead, false)));
   return { success: true };
 }
