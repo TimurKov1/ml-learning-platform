@@ -16,14 +16,14 @@ describe("admin review queue", () => {
     db.reviewAssignmentSubmission.mockResolvedValue({ success: true });
     const caller = adminReviewsRouter.createCaller(context());
     await expect(caller.list()).resolves.toEqual([{ id: 3, status: "pending" }]);
-    await expect(caller.review({ id: 3, status: "approved", reviewComment: "Верно" })).resolves.toEqual({ success: true });
-    expect(db.reviewAssignmentSubmission).toHaveBeenCalledWith({ id: 3, status: "approved", reviewComment: "Верно", reviewerId: 9 });
+    await expect(caller.review({ id: 3, status: "approved", awardedScore: 8, reviewComment: "Верно" })).resolves.toEqual({ success: true });
+    expect(db.reviewAssignmentSubmission).toHaveBeenCalledWith({ id: 3, status: "approved", awardedScore: 8, reviewComment: "Верно", reviewerId: 9 });
   });
 
   it("allows returning a solution for revision with feedback", async () => {
     db.reviewAssignmentSubmission.mockResolvedValue({ success: true });
     const caller = adminReviewsRouter.createCaller(context());
-    await expect(caller.review({ id: 4, status: "revision", reviewComment: "Поясните расчёт на втором шаге." })).resolves.toEqual({ success: true });
-    expect(db.reviewAssignmentSubmission).toHaveBeenCalledWith({ id: 4, status: "revision", reviewComment: "Поясните расчёт на втором шаге.", reviewerId: 9 });
+    await expect(caller.review({ id: 4, status: "revision", awardedScore: 0, reviewComment: "Поясните расчёт на втором шаге." })).resolves.toEqual({ success: true });
+    expect(db.reviewAssignmentSubmission).toHaveBeenCalledWith({ id: 4, status: "revision", awardedScore: 0, reviewComment: "Поясните расчёт на втором шаге.", reviewerId: 9 });
   });
 });

@@ -43,6 +43,13 @@
       "when": 1786890586169,
       "tag": "0005_sparkling_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786972762614,
+      "tag": "0006_majestic_jigsaw",
+      "breakpoints": true
     }
   ]
 }

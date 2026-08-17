@@ -93,6 +93,7 @@ export const assignmentSubmissions = mysqlTable("assignment_submissions", {
   submittedFileUrl: varchar("submittedFileUrl", { length: 2000 }),
   submittedFileKey: varchar("submittedFileKey", { length: 512 }),
   autoCheckResult: text("autoCheckResult"),
+  awardedScore: int("awardedScore").default(0).notNull(),
   status: mysqlEnum("status", ["pending", "approved", "revision"]).default("pending").notNull(),
   reviewComment: text("reviewComment"),
   reviewedAt: timestamp("reviewedAt"),

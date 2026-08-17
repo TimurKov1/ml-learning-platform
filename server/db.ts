@@ -18,6 +18,7 @@ import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
 import { autoCheckMessage, reviewMessage, submissionReceivedMessage } from "./notificationContent";
 import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
+import { calculateScoreProgress, normalizeAwardedScore } from "./scoring";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -161,27 +162,23 @@ export async function getStudentStats() {
 
 export async function getStudentLeaderboard(currentStudentId: number) {
   const db = await getDb();
-  if (!db) return { totalAssignments: 0, entries: [], currentStudent: null };
+  if (!db) return { totalAssignments: 0, totalMaxScore: 0, entries: [], currentStudent: null };
   const [students, courseAssignments] = await Promise.all([
     listStudentAccounts(),
-    db.select({ id: assignments.id }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(lessons.isPublished, true)),
+    db.select({ id: assignments.id, maxScore: assignments.maxScore }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(lessons.isPublished, true)),
   ]);
   const totalAssignments = courseAssignments.length;
+  const totalMaxScore = courseAssignments.reduce((sum, assignment) => sum + assignment.maxScore, 0);
   const rows = await Promise.all(students.map(async student => {
-    const completed = await db.select({ total: count() }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, student.id), eq(assignmentSubmissions.status, "approved")));
-    const completedAssignments = Math.min(completed[0]?.total ?? 0, totalAssignments);
-    return {
-      studentId: student.id,
-      name: student.name?.trim() || student.username || "Ученик",
-      completedAssignments,
-      totalAssignments,
-      progressPercent: totalAssignments === 0 ? 100 : Math.round((completedAssignments / totalAssignments) * 100),
-      isCurrentStudent: student.id === currentStudentId,
-    };
+    const earned = await db.select({ score: assignmentSubmissions.awardedScore }).from(assignmentSubmissions).where(eq(assignmentSubmissions.studentId, student.id));
+    const totalScore = earned.reduce((sum, row) => sum + Math.max(0, row.score ?? 0), 0);
+    const completedAssignments = earned.filter(row => (row.score ?? 0) > 0).length;
+    const progressPercent = totalMaxScore === 0 ? 100 : Math.round((totalScore / totalMaxScore) * 100);
+    return { studentId: student.id, name: student.name?.trim() || student.username || "Ученик", totalScore, totalMaxScore, completedAssignments, totalAssignments, progressPercent, isCurrentStudent: student.id === currentStudentId };
   }));
-  rows.sort((a, b) => b.completedAssignments - a.completedAssignments || b.progressPercent - a.progressPercent || a.name.localeCompare(b.name, "ru"));
+  rows.sort((a, b) => b.totalScore - a.totalScore || b.progressPercent - a.progressPercent || a.name.localeCompare(b.name, "ru"));
   const entries = rows.map((row, index) => ({ ...row, rank: index + 1 }));
-  return { totalAssignments, entries, currentStudent: entries.find(entry => entry.isCurrentStudent) ?? null };
+  return { totalAssignments, totalMaxScore, entries, currentStudent: entries.find(entry => entry.isCurrentStudent) ?? null };
 }
 
 export async function createCourseSection(input: { title: string; description?: string | null; orderIndex: number }) {
@@ -234,23 +231,25 @@ export async function listCourseSectionsWithLessons(includeUnpublished = false, 
   const sections = await db.select().from(courseSections).orderBy(asc(courseSections.orderIndex), asc(courseSections.createdAt));
   const [allLessons, allAssignments] = await Promise.all([
     db.select().from(lessons).orderBy(asc(lessons.orderIndex), asc(lessons.createdAt)),
-    db.select({ id: assignments.id, lessonId: assignments.lessonId }).from(assignments),
+    db.select({ id: assignments.id, lessonId: assignments.lessonId, maxScore: assignments.maxScore }).from(assignments),
   ]);
   const visibleLessons = includeUnpublished ? allLessons : allLessons.filter(lesson => lesson.isPublished);
   const [views, submissions] = studentId ? await Promise.all([
     db.select().from(lessonViews).where(eq(lessonViews.studentId, studentId)),
-    db.select({ assignmentId: assignmentSubmissions.assignmentId }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, studentId), eq(assignmentSubmissions.status, "approved"))),
+    db.select({ assignmentId: assignmentSubmissions.assignmentId, awardedScore: assignmentSubmissions.awardedScore }).from(assignmentSubmissions).where(eq(assignmentSubmissions.studentId, studentId)),
   ]) : [[], []] as const;
   const viewedIds = new Set(views.map(view => view.lessonId));
-  const completedAssignmentIds = new Set(submissions.map(submission => submission.assignmentId));
+  const awardedByAssignment = new Map(submissions.map(submission => [submission.assignmentId, submission.awardedScore]));
   return sections.map(section => ({
     ...section,
     lessons: visibleLessons.filter(lesson => lesson.sectionId === section.id).map(lesson => {
       const lessonAssignments = allAssignments.filter(assignment => assignment.lessonId === lesson.id);
-      const completedAssignments = lessonAssignments.filter(assignment => completedAssignmentIds.has(assignment.id)).length;
+      const completedAssignments = lessonAssignments.filter(assignment => (awardedByAssignment.get(assignment.id) ?? 0) > 0).length;
       const totalAssignments = lessonAssignments.length;
-      const progressPercent = totalAssignments === 0 ? 100 : Math.round((completedAssignments / totalAssignments) * 100);
-      return { ...lesson, isViewed: viewedIds.has(lesson.id), completedAssignments, totalAssignments, progressPercent, isCompleted: progressPercent === 100 };
+      const maxScore = lessonAssignments.reduce((sum, assignment) => sum + assignment.maxScore, 0);
+      const earnedScore = lessonAssignments.reduce((sum, assignment) => sum + Math.max(0, awardedByAssignment.get(assignment.id) ?? 0), 0);
+      const progressPercent = calculateScoreProgress(earnedScore, maxScore);
+      return { ...lesson, isViewed: viewedIds.has(lesson.id), completedAssignments, totalAssignments, earnedScore, maxScore, progressPercent, isCompleted: progressPercent === 100 };
     }),
   }));
 }
@@ -288,7 +287,7 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
       const normalizedStudentStatus = !includeUnpublished && assignment.assignmentType === "code" && submission?.status === "pending" && submission.autoCheckResult ? "revision" : submission?.status ?? null;
       const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && normalizedStudentStatus !== "revision" ? null : submission?.response ?? null;
-      return { ...assignmentData, starterCode: includeUnpublished ? assignment.starterCode : assignment.assignmentType === "code" ? getPythonSolutionTemplate(testsJson, functionSignature, starterCode) : undefined, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved", response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
+      return { ...assignmentData, starterCode: includeUnpublished ? assignment.starterCode : assignment.assignmentType === "code" ? getPythonSolutionTemplate(testsJson, functionSignature, starterCode) : undefined, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved" && (submission.awardedScore ?? 0) > 0, awardedScore: submission?.awardedScore ?? 0, response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -370,14 +369,15 @@ export async function markLessonViewed(studentId: number, lessonId: number) {
 export async function submitAssignment(studentId: number, assignmentId: number, input: { response?: string; submittedFileName?: string | null; submittedFileUrl?: string | null; submittedFileKey?: string | null }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const assignment = await db.select({ id: assignments.id, title: assignments.title, lessonTitle: lessons.title, isPublished: lessons.isPublished, assignmentType: assignments.assignmentType, testsJson: assignments.testsJson }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
+  const assignment = await db.select({ id: assignments.id, title: assignments.title, lessonTitle: lessons.title, isPublished: lessons.isPublished, assignmentType: assignments.assignmentType, maxScore: assignments.maxScore, testsJson: assignments.testsJson }).from(assignments).innerJoin(lessons, eq(assignments.lessonId, lessons.id)).where(eq(assignments.id, assignmentId)).limit(1);
   if (!assignment[0]?.isPublished) throw new Error("Assignment is unavailable");
   const isCode = assignment[0].assignmentType === "code";
   if (isCode && !input.response?.trim()) throw new Error("Добавьте Python-код перед отправкой.");
   if (!isCode && !input.submittedFileKey) throw new Error("Прикрепите файл перед отправкой.");
   const autoCheck = isCode ? await runPythonChecks(input.response!, buildPythonTestCode(assignment[0].testsJson)) : null;
   const status = isCode ? (autoCheck?.passed ? "approved" : "revision") : "pending";
-  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
+  const awardedScore = isCode && autoCheck?.passed ? assignment[0].maxScore : 0;
+  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
   const student = await db.select({ name: users.name }).from(users).where(eq(users.id, studentId)).limit(1);
   const admins = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin"));
   await Promise.all(admins.map(admin => createNotification({ recipientUserId: admin.id, kind: "submission_received", title: "Новое решение ученика", message: submissionReceivedMessage(student[0]?.name ?? "Ученик", assignment[0].title), link: "reviews" })));
@@ -389,12 +389,12 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
 
 export async function listStudentProgress(studentId: number) {
   const db = await getDb();
-  if (!db) return { viewedLessonIds: [], completedAssignmentIds: [] };
+  if (!db) return { viewedLessonIds: [], completedAssignmentIds: [], earnedScore: 0 };
   const [views, submissions] = await Promise.all([
     db.select({ lessonId: lessonViews.lessonId }).from(lessonViews).where(eq(lessonViews.studentId, studentId)),
-    db.select({ assignmentId: assignmentSubmissions.assignmentId }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, studentId), eq(assignmentSubmissions.status, "approved"))),
+    db.select({ assignmentId: assignmentSubmissions.assignmentId, awardedScore: assignmentSubmissions.awardedScore }).from(assignmentSubmissions).where(eq(assignmentSubmissions.studentId, studentId)),
   ]);
-  return { viewedLessonIds: views.map(row => row.lessonId), completedAssignmentIds: submissions.map(row => row.assignmentId) };
+  return { viewedLessonIds: views.map(row => row.lessonId), completedAssignmentIds: submissions.filter(row => (row.awardedScore ?? 0) > 0).map(row => row.assignmentId), earnedScore: submissions.reduce((sum, row) => sum + Math.max(0, row.awardedScore ?? 0), 0) };
 }
 
 export async function listAssignmentSubmissionsForReview() {
@@ -414,6 +414,8 @@ export async function listAssignmentSubmissionsForReview() {
       assignmentId: assignments.id,
       assignmentTitle: assignments.title,
       assignmentInstructions: assignments.instructions,
+      maxScore: assignments.maxScore,
+      awardedScore: assignmentSubmissions.awardedScore,
       assignmentType: assignments.assignmentType,
       submittedFileName: assignmentSubmissions.submittedFileName,
       submittedFileKey: assignmentSubmissions.submittedFileKey,
@@ -437,15 +439,17 @@ export async function getSubmissionFileAccessUrl(submissionId: number) {
   return { url: await storageGetSignedUrl(result[0].fileKey) };
 }
 
-export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; reviewComment: string | null; reviewerId: number }) {
+export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; awardedScore: number; reviewComment: string | null; reviewerId: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const existing = await db.select({ studentId: assignmentSubmissions.studentId, assignmentTitle: assignments.title }).from(assignmentSubmissions).innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id)).where(eq(assignmentSubmissions.id, input.id)).limit(1);
-  await db.update(assignmentSubmissions).set({ status: input.status, reviewComment: input.reviewComment, reviewedAt: new Date(), reviewedById: input.reviewerId }).where(eq(assignmentSubmissions.id, input.id));
+  const existing = await db.select({ studentId: assignmentSubmissions.studentId, assignmentTitle: assignments.title, maxScore: assignments.maxScore }).from(assignmentSubmissions).innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id)).where(eq(assignmentSubmissions.id, input.id)).limit(1);
+  const maxScore = existing[0]?.maxScore ?? 10;
+  const awardedScore = input.status === "approved" ? normalizeAwardedScore(input.awardedScore, maxScore) : 0;
+  await db.update(assignmentSubmissions).set({ status: input.status, awardedScore, reviewComment: input.reviewComment, reviewedAt: new Date(), reviewedById: input.reviewerId }).where(eq(assignmentSubmissions.id, input.id));
   if (existing[0]) {
     await createNotification({ recipientUserId: existing[0].studentId, kind: input.status === "approved" ? "submission_approved" : "submission_revision", title: input.status === "approved" ? "Решение зачтено" : "Решение отправлено на доработку", message: reviewMessage(existing[0].assignmentTitle, input.status, input.reviewComment), link: "dashboard" });
   }
-  return { success: true };
+  return { success: true, awardedScore };
 }
 
 
