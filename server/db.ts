@@ -18,7 +18,7 @@ import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
 import { autoCheckMessage, reviewMessage, submissionReceivedMessage } from "./notificationContent";
 import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
-import { calculateScoreProgress, needsResubmission, nextAttemptNumber, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
+import { calculateLessonProgress, calculateScoreProgress, needsResubmission, nextAttemptNumber, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -248,8 +248,9 @@ export async function listCourseSectionsWithLessons(includeUnpublished = false, 
       const totalAssignments = lessonAssignments.length;
       const maxScore = lessonAssignments.reduce((sum, assignment) => sum + assignment.maxScore, 0);
       const earnedScore = lessonAssignments.reduce((sum, assignment) => sum + Math.max(0, awardedByAssignment.get(assignment.id) ?? 0), 0);
-      const progressPercent = calculateScoreProgress(earnedScore, maxScore);
-      return { ...lesson, isViewed: viewedIds.has(lesson.id), completedAssignments, totalAssignments, earnedScore, maxScore, progressPercent, isCompleted: progressPercent === 100 };
+      const isViewed = viewedIds.has(lesson.id);
+      const progressPercent = calculateLessonProgress(totalAssignments, isViewed, earnedScore, maxScore);
+      return { ...lesson, isViewed, completedAssignments, totalAssignments, earnedScore, maxScore, progressPercent, isCompleted: totalAssignments === 0 ? isViewed : progressPercent === 100 };
     }),
   }));
 }

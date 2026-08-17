@@ -32,6 +32,11 @@ describe("structured Python test cases", () => {
     expect(getPythonSolutionTemplate(structured, null, "def solution(numbers, limit):\\n    return 0")).toContain("def solution(numbers, limit):");
   });
 
+  it("extracts names when parameters have annotations or defaults", () => {
+    expect(extractSolutionSignature("def solution(numbers: list[int], limit: int = 3):\n    return numbers[:limit]")).toBe("solution(numbers, limit)");
+    expect(getPythonSolutionTemplate(structured, null, "# task\ndef solution(values, threshold=0):\n    return values")).toContain("def solution(values, threshold):");
+  });
+
   it("supports explicit one- and multi-argument signatures", () => {
     expect(getPythonSolutionTemplate(structured, "solution(numbers)")).toContain("def solution(numbers):");
     expect(getPythonSolutionTemplate(structured, "def solution(numbers, limit):")).toContain("def solution(numbers, limit):");

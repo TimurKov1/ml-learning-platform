@@ -3,6 +3,11 @@ export function normalizeAwardedScore(score: number, maxScore: number) {
   return Math.min(maxScore, Math.max(0, Math.round(score)));
 }
 
+export function calculateLessonProgress(totalAssignments: number, isViewed: boolean, earnedScore: number, maxScore: number) {
+  if (totalAssignments === 0) return isViewed ? 100 : 0;
+  return calculateScoreProgress(earnedScore, maxScore);
+}
+
 export function calculateScoreProgress(earnedScore: number, maxScore: number) {
   const safeMax = Math.max(0, maxScore);
   const safeEarned = Math.min(safeMax, Math.max(0, earnedScore));

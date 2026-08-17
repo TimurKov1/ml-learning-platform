@@ -59,14 +59,22 @@ export function buildPythonTestCode(value: string | null | undefined): string {
   }).join("\n\n");
 }
 
+function parameterNamesFromList(rawParameters: string): string[] {
+  return rawParameters.split(",").map(parameter => parameter.trim()).filter(Boolean).map(parameter => {
+    const withoutVariadic = parameter.replace(/^\*{1,2}/, "").trim();
+    const withoutDefault = withoutVariadic.split("=")[0].trim();
+    const name = withoutDefault.split(":")[0].trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("Имена параметров должны содержать только латинские буквы, цифры и символ _.");
+    return name;
+  });
+}
+
 export function normalizeFunctionSignature(signature: string | null | undefined, testsJson?: string | null): string {
   const raw = signature?.trim();
   if (raw) {
     const match = raw.match(/^(?:def\s+)?solution\s*\(([^)]*)\)\s*:?\s*$/);
     if (!match) throw new Error("Сигнатура должна иметь вид solution(arg1, arg2) или def solution(arg1, arg2):.");
-    const parameters = (match[1] ?? "").split(",").map(parameter => parameter.trim()).filter(Boolean);
-    if (parameters.some(parameter => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(parameter))) throw new Error("Имена параметров должны содержать только латинские буквы, цифры и символ _.");
-    return `solution(${parameters.join(", ")})`;
+    return `solution(${parameterNamesFromList(match[1] ?? "").join(", ")})`;
   }
   const structured = parseStructuredPythonTests(testsJson);
   let argumentCount = 0;
@@ -91,8 +99,8 @@ export function validateStructuredTestArity(value: string | null | undefined, si
 }
 
 export function extractSolutionSignature(code: string | null | undefined): string | null {
-  const match = code?.match(/(?:^|\n)\s*def\s+solution\s*\([^)]*\)\s*:/);
-  return match ? normalizeFunctionSignature(match[0].trim()) : null;
+  const match = code?.match(/\bdef\s+solution\s*\(([^)]*)\)\s*:/);
+  return match ? normalizeFunctionSignature(`solution(${match[1] ?? ""})`) : null;
 }
 
 export function getPythonSolutionTemplate(value: string | null | undefined, signature?: string | null, starterCode?: string | null): string {
