@@ -9,6 +9,10 @@ export function calculateScoreProgress(earnedScore: number, maxScore: number) {
   return safeMax === 0 ? 100 : Math.round((safeEarned / safeMax) * 100);
 }
 
+export function nextAttemptNumber(previousAttemptNumber: number | null | undefined) {
+  return Math.max(1, (previousAttemptNumber ?? 0) + 1);
+}
+
 export function shouldNotifyForSubmission(assignmentType: "manual_file" | "code") {
   return assignmentType === "manual_file";
 }

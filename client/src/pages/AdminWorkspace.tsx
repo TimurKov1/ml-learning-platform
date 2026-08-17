@@ -9,7 +9,6 @@ import { AdminQueryState } from "@/components/AdminQueryState";
 import { LessonExtrasPanel } from "@/components/LessonExtrasPanel";
 import { MarkdownLessonEditor } from "@/components/MarkdownLessonEditor";
 import { SubmissionsReviewPanel } from "@/components/SubmissionsReviewPanel";
-import { AdminNotificationBell } from "@/components/NotificationBell";
 import { StudentsManagerPanel } from "@/components/StudentsManagerPanel";
 import { BookOpenText, CheckCircle2, ChevronRight, CirclePlus, ClipboardCheck, ClipboardList, FileText, LayoutDashboard, Link as LinkIcon, Loader2, LogOut, Pencil, Plus, Trash2, Upload, UsersRound, Video } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
@@ -31,10 +30,12 @@ export default function AdminWorkspace() {
   const lessonsQuery = trpc.admin.course.lessons.list.useQuery();
   const studentsQuery = trpc.admin.students.list.useQuery();
   const statisticsQuery = trpc.admin.students.statistics.useQuery();
+  const reviewsQuery = trpc.admin.reviews.list.useQuery();
   const sections = sectionsQuery.data ?? [];
   const lessons = lessonsQuery.data ?? [];
   const students = studentsQuery.data ?? [];
   const statistics = statisticsQuery.data ?? [];
+  const pendingReviewCount = (reviewsQuery.data ?? []).filter(item => item.assignmentType === "manual_file" && item.status === "pending").length;
 
   const refreshCourse = async () => {
     await Promise.all([sectionsQuery.refetch(), lessonsQuery.refetch()]);
@@ -54,7 +55,7 @@ export default function AdminWorkspace() {
         <div className="flex items-center gap-3 px-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#ddc48f] text-[#142440]"><BookOpenText className="h-5 w-5" /></span><span className="font-semibold tracking-[0.12em] uppercase">NeuroClass</span></div>
         <p className="mt-7 px-3 text-[10px] font-bold tracking-[0.18em] text-[#8ea0bd] uppercase">Управление курсом</p>
         <nav className="mt-3 space-y-1">
-          {nav.map(item => <button key={item.id} onClick={() => setTab(item.id)} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm transition ${tab === item.id ? "bg-white/10 font-semibold text-white" : "text-[#bac5d8] hover:bg-white/5 hover:text-white"}`}><item.icon className={`h-4 w-4 ${tab === item.id ? "text-[#ddc48f]" : ""}`} />{item.label}</button>)}
+          {nav.map(item => <button key={item.id} onClick={() => setTab(item.id)} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm transition ${tab === item.id ? "bg-white/10 font-semibold text-white" : "text-[#bac5d8] hover:bg-white/5 hover:text-white"}`}><item.icon className={`h-4 w-4 ${tab === item.id ? "text-[#ddc48f]" : ""}`} /><span className="flex-1 text-left">{item.label}</span>{item.id === "reviews" && tab !== "reviews" && pendingReviewCount > 0 && <span className="grid min-w-5 h-5 place-items-center rounded-full bg-[#d94841] px-1 text-[10px] font-bold text-white">{pendingReviewCount > 99 ? "99+" : pendingReviewCount}</span>}</button>)}
         </nav>
         <div className="mt-auto rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-xs font-semibold text-[#ddc48f]">Администратор</p><p className="mt-1 text-xs leading-5 text-[#b8c4d7]">Создавайте содержание и отслеживайте путь учеников.</p><button onClick={() => logout()} className="mt-4 flex w-full items-center gap-2 border-t border-white/10 pt-3 text-xs font-semibold text-[#d4deec] transition hover:text-[#ddc48f]"><LogOut className="h-3.5 w-3.5" />Выйти</button></div>
       </aside>
@@ -62,10 +63,10 @@ export default function AdminWorkspace() {
         <header className="flex items-center justify-between border-b border-[#e3ddd2] bg-[#faf8f3]/85 px-5 py-4 backdrop-blur sm:px-8">
           <div className="flex items-center gap-3 lg:hidden"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#142440] text-[#ddc48f]"><BookOpenText className="h-4 w-4" /></span><span className="text-sm font-bold tracking-[.12em] uppercase">NeuroClass</span></div>
           <div className="hidden lg:block"><p className="text-xs font-semibold tracking-[0.16em] text-[#a47d3a] uppercase">Панель администратора</p><p className="mt-1 text-sm text-[#778196]">Управление учебным пространством</p></div>
-          <div className="flex items-center gap-3"><AdminNotificationBell /><span className="hidden text-sm text-[#65708a] sm:inline">{sections.length} разделов · {lessons.length} уроков</span><Button onClick={() => logout()} size="icon" variant="ghost" className="lg:hidden" aria-label="Выйти"><LogOut className="h-4 w-4" /></Button><span className="grid h-9 w-9 place-items-center rounded-full bg-[#e9dfcd] text-xs font-bold text-[#745924]">А</span></div>
+          <div className="flex items-center gap-3"><span className="hidden text-sm text-[#65708a] sm:inline">{sections.length} разделов · {lessons.length} уроков</span><Button onClick={() => logout()} size="icon" variant="ghost" className="lg:hidden" aria-label="Выйти"><LogOut className="h-4 w-4" /></Button><span className="grid h-9 w-9 place-items-center rounded-full bg-[#e9dfcd] text-xs font-bold text-[#745924]">А</span></div>
         </header>
         <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
-          <div className="mb-6 flex gap-2 overflow-x-auto lg:hidden">{nav.map(item => <Button key={item.id} variant="outline" onClick={() => setTab(item.id)} className={`shrink-0 ${tab === item.id ? "border-[#142440] bg-[#142440] text-white hover:bg-[#142440] hover:text-white" : "bg-white"}`}><item.icon className="mr-2 h-4 w-4" />{item.label}</Button>)}</div>
+          <div className="mb-6 flex gap-2 overflow-x-auto lg:hidden">{nav.map(item => <Button key={item.id} variant="outline" onClick={() => setTab(item.id)} className={`shrink-0 ${tab === item.id ? "border-[#142440] bg-[#142440] text-white hover:bg-[#142440] hover:text-white" : "bg-white"}`}><item.icon className="mr-2 h-4 w-4" />{item.label}{item.id === "reviews" && tab !== "reviews" && pendingReviewCount > 0 && <span className="ml-1 grid min-w-5 h-5 place-items-center rounded-full bg-[#d94841] px-1 text-[10px] font-bold text-white">{pendingReviewCount > 99 ? "99+" : pendingReviewCount}</span>}</Button>)}</div>
           {tab === "overview" && <Overview sections={sections.length} lessons={lessons.length} students={students.length} statistics={statistics} loading={sectionsQuery.isLoading || lessonsQuery.isLoading || studentsQuery.isLoading || statisticsQuery.isLoading} error={sectionsQuery.error || lessonsQuery.error || studentsQuery.error || statisticsQuery.error} onRetry={() => { void Promise.all([sectionsQuery.refetch(), lessonsQuery.refetch(), studentsQuery.refetch(), statisticsQuery.refetch()]); }} />}
           {tab === "sections" && <SectionsManager sections={sections} onChanged={refreshCourse} loading={sectionsQuery.isLoading} error={sectionsQuery.error} onRetry={() => { void sectionsQuery.refetch(); }} />}
           {tab === "lessons" && <LessonsManager sections={sections} lessons={lessons} onChanged={refreshCourse} loading={sectionsQuery.isLoading || lessonsQuery.isLoading} error={sectionsQuery.error || lessonsQuery.error} onRetry={() => { void refreshCourse(); }} />}

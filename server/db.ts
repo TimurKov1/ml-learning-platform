@@ -18,7 +18,7 @@ import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
 import { autoCheckMessage, reviewMessage, submissionReceivedMessage } from "./notificationContent";
 import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
-import { calculateScoreProgress, needsResubmission, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
+import { calculateScoreProgress, needsResubmission, nextAttemptNumber, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -378,7 +378,10 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   const autoCheck = isCode ? await runPythonChecks(input.response!, buildPythonTestCode(assignment[0].testsJson)) : null;
   const status = isCode ? (autoCheck?.passed ? "approved" : "revision") : "pending";
   const awardedScore = isCode && autoCheck?.passed ? assignment[0].maxScore : 0;
-  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
+  const previousSubmission = await db.select({ awardedScore: assignmentSubmissions.awardedScore, reviewComment: assignmentSubmissions.reviewComment, attemptNumber: assignmentSubmissions.attemptNumber }).from(assignmentSubmissions).where(and(eq(assignmentSubmissions.studentId, studentId), eq(assignmentSubmissions.assignmentId, assignmentId))).limit(1);
+  const previous = previousSubmission[0];
+  const attemptNumber = nextAttemptNumber(previous?.attemptNumber);
+  await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, attemptNumber, previousAwardedScore: previous?.awardedScore ?? null, previousReviewComment: previous?.reviewComment ?? null, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, attemptNumber, previousAwardedScore: previous?.awardedScore ?? null, previousReviewComment: previous?.reviewComment ?? null, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
   const student = await db.select({ name: users.name }).from(users).where(eq(users.id, studentId)).limit(1);
   const admins = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin"));
   if (shouldNotifyForSubmission(assignment[0].assignmentType)) {
@@ -416,6 +419,9 @@ export async function listAssignmentSubmissionsForReview() {
       assignmentInstructions: assignments.instructions,
       maxScore: assignments.maxScore,
       awardedScore: assignmentSubmissions.awardedScore,
+      attemptNumber: assignmentSubmissions.attemptNumber,
+      previousAwardedScore: assignmentSubmissions.previousAwardedScore,
+      previousReviewComment: assignmentSubmissions.previousReviewComment,
       assignmentType: assignments.assignmentType,
       submittedFileName: assignmentSubmissions.submittedFileName,
       submittedFileKey: assignmentSubmissions.submittedFileKey,
