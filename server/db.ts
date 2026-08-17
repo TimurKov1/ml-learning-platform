@@ -18,7 +18,7 @@ import { storageGetSignedUrl } from "./storage";
 import { runPythonChecks } from "./pythonCodeRunner";
 import { autoCheckMessage, reviewMessage, submissionReceivedMessage } from "./notificationContent";
 import { buildPythonTestCode, getPythonSolutionTemplate, getVisiblePythonExamples, validateStructuredTestArity } from "./pythonTestCases";
-import { calculateScoreProgress, normalizeAwardedScore } from "./scoring";
+import { calculateScoreProgress, needsResubmission, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -285,9 +285,10 @@ export async function getLessonDetail(id: number, includeUnpublished = true, stu
       const submission = submissionsByAssignment.get(assignment.id);
       const { testsJson, starterCode, functionSignature, ...studentSafeAssignment } = assignment;
       const assignmentData = includeUnpublished ? assignment : studentSafeAssignment;
-      const normalizedStudentStatus = !includeUnpublished && assignment.assignmentType === "code" && submission?.status === "pending" && submission.autoCheckResult ? "revision" : submission?.status ?? null;
+      const isPartialManualApproval = needsResubmission(assignment.assignmentType, submission?.status, submission?.awardedScore ?? 0, assignment.maxScore);
+      const normalizedStudentStatus = !includeUnpublished && ((assignment.assignmentType === "code" && submission?.status === "pending" && submission.autoCheckResult) || isPartialManualApproval) ? "revision" : submission?.status ?? null;
       const visibleResponse = !includeUnpublished && assignment.assignmentType === "code" && normalizedStudentStatus !== "revision" ? null : submission?.response ?? null;
-      return { ...assignmentData, starterCode: includeUnpublished ? assignment.starterCode : assignment.assignmentType === "code" ? getPythonSolutionTemplate(testsJson, functionSignature, starterCode) : undefined, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved" && (submission.awardedScore ?? 0) > 0, awardedScore: submission?.awardedScore ?? 0, response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
+      return { ...assignmentData, starterCode: includeUnpublished ? assignment.starterCode : assignment.assignmentType === "code" ? getPythonSolutionTemplate(testsJson, functionSignature, starterCode) : undefined, publicTests: includeUnpublished ? undefined : getVisiblePythonExamples(testsJson), isCompleted: submission?.status === "approved" && (submission.awardedScore ?? 0) >= assignment.maxScore, awardedScore: submission?.awardedScore ?? 0, response: visibleResponse, submittedFileName: submission?.submittedFileName ?? null, submittedFileKey: submission?.submittedFileKey ?? null, autoCheckResult: submission?.autoCheckResult ?? null, submissionStatus: normalizedStudentStatus, reviewComment: submission?.reviewComment ?? null };
     }),
   };
 }
@@ -380,9 +381,8 @@ export async function submitAssignment(studentId: number, assignmentId: number, 
   await db.insert(assignmentSubmissions).values({ studentId, assignmentId, response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status }).onDuplicateKeyUpdate({ set: { response: input.response ?? "", submittedFileName: input.submittedFileName ?? null, submittedFileUrl: input.submittedFileUrl ?? null, submittedFileKey: input.submittedFileKey ?? null, autoCheckResult: autoCheck ? JSON.stringify(autoCheck) : null, awardedScore, status, reviewComment: null, reviewedAt: null, reviewedById: null, completedAt: new Date() } });
   const student = await db.select({ name: users.name }).from(users).where(eq(users.id, studentId)).limit(1);
   const admins = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin"));
-  await Promise.all(admins.map(admin => createNotification({ recipientUserId: admin.id, kind: "submission_received", title: "Новое решение ученика", message: submissionReceivedMessage(student[0]?.name ?? "Ученик", assignment[0].title), link: "reviews" })));
-  if (isCode) {
-    await createNotification({ recipientUserId: studentId, kind: status === "approved" ? "submission_approved" : "submission_revision", title: status === "approved" ? "Решение зачтено" : "Нужна доработка решения", message: autoCheckMessage(assignment[0].title, status === "approved"), link: `lesson/${assignment[0].lessonTitle}` });
+  if (shouldNotifyForSubmission(assignment[0].assignmentType)) {
+    await Promise.all(admins.map(admin => createNotification({ recipientUserId: admin.id, kind: "submission_received", title: "Новое решение ученика", message: submissionReceivedMessage(student[0]?.name ?? "Ученик", assignment[0].title), link: "reviews" })));
   }
   return { success: true, status, autoCheck };
 }
@@ -442,11 +442,11 @@ export async function getSubmissionFileAccessUrl(submissionId: number) {
 export async function reviewAssignmentSubmission(input: { id: number; status: "approved" | "revision"; awardedScore: number; reviewComment: string | null; reviewerId: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const existing = await db.select({ studentId: assignmentSubmissions.studentId, assignmentTitle: assignments.title, maxScore: assignments.maxScore }).from(assignmentSubmissions).innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id)).where(eq(assignmentSubmissions.id, input.id)).limit(1);
+  const existing = await db.select({ studentId: assignmentSubmissions.studentId, assignmentTitle: assignments.title, assignmentType: assignments.assignmentType, maxScore: assignments.maxScore }).from(assignmentSubmissions).innerJoin(assignments, eq(assignmentSubmissions.assignmentId, assignments.id)).where(eq(assignmentSubmissions.id, input.id)).limit(1);
   const maxScore = existing[0]?.maxScore ?? 10;
   const awardedScore = input.status === "approved" ? normalizeAwardedScore(input.awardedScore, maxScore) : 0;
   await db.update(assignmentSubmissions).set({ status: input.status, awardedScore, reviewComment: input.reviewComment, reviewedAt: new Date(), reviewedById: input.reviewerId }).where(eq(assignmentSubmissions.id, input.id));
-  if (existing[0]) {
+  if (existing[0] && existing[0].assignmentType === "manual_file") {
     await createNotification({ recipientUserId: existing[0].studentId, kind: input.status === "approved" ? "submission_approved" : "submission_revision", title: input.status === "approved" ? "Решение зачтено" : "Решение отправлено на доработку", message: reviewMessage(existing[0].assignmentTitle, input.status, input.reviewComment), link: "dashboard" });
   }
   return { success: true, awardedScore };

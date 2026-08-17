@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateScores, calculateScoreProgress, normalizeAwardedScore } from "./scoring";
+import { aggregateScores, calculateScoreProgress, needsResubmission, normalizeAwardedScore, shouldNotifyForSubmission } from "./scoring";
 
 describe("score calculations", () => {
   it("clamps an awarded manual score to 0..maxScore", () => {
@@ -12,6 +12,17 @@ describe("score calculations", () => {
     expect(calculateScoreProgress(5, 10)).toBe(50);
     expect(calculateScoreProgress(10, 10)).toBe(100);
     expect(calculateScoreProgress(0, 0)).toBe(100);
+  });
+
+  it("notifies only for file submissions", () => {
+    expect(shouldNotifyForSubmission("manual_file")).toBe(true);
+    expect(shouldNotifyForSubmission("code")).toBe(false);
+  });
+
+  it("allows a file resubmission after a partial approval", () => {
+    expect(needsResubmission("manual_file", "approved", 7, 10)).toBe(true);
+    expect(needsResubmission("manual_file", "approved", 10, 10)).toBe(false);
+    expect(needsResubmission("code", "approved", 7, 10)).toBe(false);
   });
 
   it("aggregates earned and maximum points across assignments", () => {

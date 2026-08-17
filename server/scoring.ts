@@ -9,6 +9,14 @@ export function calculateScoreProgress(earnedScore: number, maxScore: number) {
   return safeMax === 0 ? 100 : Math.round((safeEarned / safeMax) * 100);
 }
 
+export function shouldNotifyForSubmission(assignmentType: "manual_file" | "code") {
+  return assignmentType === "manual_file";
+}
+
+export function needsResubmission(assignmentType: "manual_file" | "code", status: "pending" | "approved" | "revision" | null | undefined, awardedScore: number, maxScore: number) {
+  return assignmentType === "manual_file" && status === "approved" && awardedScore < maxScore;
+}
+
 export function aggregateScores(scores: number[], maxScores: number[]) {
   const earnedScore = scores.reduce((sum, score) => sum + Math.max(0, score), 0);
   const maxScore = maxScores.reduce((sum, score) => sum + Math.max(0, score), 0);
