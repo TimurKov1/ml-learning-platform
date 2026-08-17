@@ -67,6 +67,7 @@ export const assignments = mysqlTable("assignments", {
   lessonId: int("lessonId").notNull().references(() => lessons.id, { onDelete: "cascade" }),
   title: varchar("title", { length: 180 }).notNull(),
   instructions: text("instructions").notNull(),
+  maxScore: int("maxScore").default(10).notNull(),
   assignmentType: mysqlEnum("assignmentType", ["manual_file", "code"]).default("manual_file").notNull(),
   language: varchar("language", { length: 32 }),
   starterCode: text("starterCode"),

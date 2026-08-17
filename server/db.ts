@@ -331,7 +331,7 @@ export async function getStudentMaterialAccessUrl(materialId: number) {
   return { url: material.fileUrl };
 }
 
-type AssignmentWrite = { lessonId: number; title: string; instructions: string; assignmentType?: "manual_file" | "code"; language?: string | null; starterCode?: string | null; functionSignature?: string | null; testsJson?: string | null; orderIndex: number };
+type AssignmentWrite = { lessonId: number; title: string; instructions: string; maxScore: number; assignmentType?: "manual_file" | "code"; language?: string | null; starterCode?: string | null; functionSignature?: string | null; testsJson?: string | null; orderIndex: number };
 
 export async function addAssignment(input: AssignmentWrite) {
   const arityError = input.assignmentType === "code" ? validateStructuredTestArity(input.testsJson, input.functionSignature) : null;
