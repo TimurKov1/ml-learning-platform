@@ -104,7 +104,8 @@ export function extractSolutionSignature(code: string | null | undefined): strin
 }
 
 export function getPythonSolutionTemplate(value: string | null | undefined, signature?: string | null, starterCode?: string | null): string {
-  const header = normalizeFunctionSignature(signature ?? extractSolutionSignature(starterCode), value);
+  const effectiveSignature = signature?.trim() || extractSolutionSignature(starterCode);
+  const header = normalizeFunctionSignature(effectiveSignature, value);
   return `def ${header}:\n    # Напишите решение здесь. Имя solution менять нельзя.\n    pass`;
 }
 
